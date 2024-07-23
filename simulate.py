@@ -41,11 +41,11 @@ def get_angles(matrix, x0=[0, 0, 0], output=False, first=False):
     return alpha % 360, beta % 360, gamma % 360, res[1]
 
 
-positions = [[0, 0, 120]]
+positions = [[0, 0, 90]]
 xs = []
 es = []
 first = True
-for i in np.arange(0, 180, 10):
+for i in np.arange(0, 181, 10):
     print(i)
     print(positions[-1])
     a, b, g, e = get_angles(hwp(i), output=True, x0=positions[-1], first=first)

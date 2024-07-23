@@ -8,10 +8,10 @@ import matplotlib.pyplot as plt
 def get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp):
     # Measure
     angle_max = 180
-    deg_per_sec = 5
+    deg_per_sec = 10
 
     source.turn_off()
-    waveplates.move_to(0)
+    waveplates.home()
     source.turn_on("V")
 
     measurement = folder + "coupling_efficiency_{}/".format(
@@ -19,14 +19,14 @@ def get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp):
     os.mkdir(measurement)
 
     waveplates.jog_like_HWP(deg_per_sec)
-    timestamp.read(measurement + "hwp.dat")
-    time.sleep(int(angle_max / deg_per_sec) / 100)
-    timestamp.stop()
+    data=timestamp.read(int(angle_max / deg_per_sec))
     waveplates.stop()
 
+    print(data
+          )
     # Evaluate
-    counts = timestamp.get_counts_per_second()
-    times = np.arange(0, angle_max / deg_per_sec + 1)
+    times,counts = timestamp.get_counts_per_second()
+    #times = np.arange(0, angle_max / deg_per_sec + 1)
 
     counts = np.array([[
         count[0] / sum(count), count[1] / sum(count), count[2] / sum(count),

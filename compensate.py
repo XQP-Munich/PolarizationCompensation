@@ -1,15 +1,15 @@
 import os
 import Measurements as mm
-import Devices_Manual as man
+import Devices_Thorlabs as devices
 
 folder = "./data/"
 if not os.path.exists(folder):
     os.mkdir(folder)
 
 # initialize devices
-source = man.Source()
-waveplates = man.waveplates
-timestamp = man.Timestamp()
+source = devices.Source()
+waveplates = devices.waveplates
+timestamp = devices.Timestamp()
 
 # Do this ONCE
 # Caracterize Waveplates find 0 pos mark down in devices.py
@@ -17,7 +17,7 @@ timestamp = man.Timestamp()
 
 # Do this every time it is moved
 # Send any Linear Pos into bob
-mm.get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp)
+effs = mm.get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp)
 #PM.turn_HWP_cont(device_adress=0,
 #                 folder=folder,
 #                 angle_max=180,
