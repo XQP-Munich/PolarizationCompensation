@@ -19,13 +19,12 @@ def get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp):
     os.mkdir(measurement)
 
     waveplates.jog_like_HWP(deg_per_sec)
-    data=timestamp.read(int(angle_max / deg_per_sec))
+    data = timestamp.read(int(angle_max / deg_per_sec))
     waveplates.stop()
 
-    print(data
-          )
+    print(data)
     # Evaluate
-    times,counts = timestamp.get_counts_per_second()
+    times, counts = timestamp.get_counts_per_second()
     #times = np.arange(0, angle_max / deg_per_sec + 1)
 
     counts = np.array([[
@@ -101,3 +100,47 @@ def get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp):
     np.savetxt(folder + "effs.txt", np.array([effH, effV, effP, effM]))
 
     return np.array([effH, effV, effP, effM])
+
+
+def get_Polcomp_Angles(folder, source, waveplates, timestamp):
+    measurements = []
+    channels = [0, 3]
+    measurementTime = 5
+    waveplates.move_to(0)
+
+    # Measure H using unitary
+    source.turn_on(channels[0])
+    timestamp.read(measurementTime)
+    times, counts = timestamp.get_counts_per_second()
+    measurements.append(counts)
+    source.turn_off()
+
+    # Measure P using unitary
+    source.turn_on(channels[1])
+    timestamp.read(measurementTime)
+    times, counts = timestamp.get_counts_per_second()
+    measurements.append(counts)
+    source.turn_off()
+
+    # Measure H using l4
+    # Move "3 Waveplates" such that they represent a single lamba/4 at 0 deg
+    waveplates.move_to_l4()
+
+    source.turn_on(channels[0])
+    timestamp.read(measurementTime)
+    times, counts = timestamp.get_counts_per_second()
+    measurements.append(counts)
+    source.turn_off()
+
+    # Measure P using l4
+    source.turn_on(channels[1])
+    timestamp.read(measurementTime)
+    times, counts = timestamp.get_counts_per_second()
+    measurements.append(counts)
+    source.turn_off()
+
+    # Measure dark counts
+    timestamp.read(measurementTime)
+    times, counts = timestamp.get_counts_per_second()
+    measurements.append(counts)
+    return measurements
