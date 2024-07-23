@@ -51,3 +51,53 @@ def get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp):
     plt.legend()
 
     plt.show()
+
+    beamsplitterratio = (ps[0][0] + ps[1][0]) / (ps[2][0] + ps[3][0])
+
+    print("The beamsplitter ratio of HV/PM is: ", beamsplitterratio)
+
+    effH = ps[0][0] / (ps[0][0] + ps[1][0])  #+ps[2][0]+ps[3][0])
+    effV = ps[1][0] / (ps[0][0] + ps[1][0])  #+ps[2][0]+ps[3][0])
+    effP = ps[2][0] / (ps[2][0] + ps[3][0])  #+ps[2][0]+ps[3][0])
+    effM = ps[3][0] / (ps[2][0] + ps[3][0])  #+ps[2][0]+ps[3][0])
+
+    print("eff H = ", effH)
+    print("eff V = ", effV)
+    print("eff P = ", effP)
+    print("eff M = ", effM)
+
+    counts_corr_H = (counts[:, 0] - ps[0][3]) / effH
+    counts_corr_V = (counts[:, 1] - ps[1][3]) / effV
+    counts_corr_P = (counts[:, 2] - ps[2][3]) / effP
+    counts_corr_M = (counts[:, 3] - ps[3][3]) / effM
+    plt.plot(times, counts_corr_H)
+    plt.plot(times, counts_corr_V)
+    plt.plot(times, counts_corr_P)
+    plt.plot(times, counts_corr_M)
+
+    print('Phase of H in deg: ', ps[0][2] / (2 * np.pi) * 360)
+    print('Phase of V in deg: ', ps[1][2] / (2 * np.pi) * 360)
+    print('Phase of P in deg: ', ps[2][2] / (2 * np.pi) * 360)
+    print('Phase of M in deg: ', ps[3][2] / (2 * np.pi) * 360)
+    print('Freq of H: ', ps[0][1])
+    print('Freq of V: ', ps[1][1])
+    print('Freq of P: ', ps[2][1])
+    print('Freq of M: ', ps[3][1])
+    plt.axvline(ps[0][2] / (np.pi * 2) * 360, color='b')
+    plt.axvline(ps[1][2] / (np.pi * 2) * 360, color='b')
+    plt.axvline(ps[2][2] / (np.pi * 2) * 360, color='b')
+    plt.axvline(ps[3][2] / (np.pi * 2) * 360, color='b')
+
+    plt.title("Corrected Measurements")
+
+    plt.show()
+
+    plt.scatter(
+        times, counts[:, 0] / effH + counts[:, 1] / effV +
+        counts[:, 2] / effP + counts[:, 3] / effM)
+
+    plt.show()
+
+    np.savetxt(folder + "effs.txt", np.array([effH, effV, effP, effM]))
+
+    return np.array([effH, effV, effP, effM])
