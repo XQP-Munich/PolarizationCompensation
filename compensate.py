@@ -17,7 +17,8 @@ timestamp = devices.Timestamp()
 
 # Do this every time it is moved
 # Send any Linear Pos into bob
-effs = mm.get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp)
+effs = mm.get_Coupling_Efficiency_cont(source, waveplates, timestamp)
+print(effs)
 #PM.turn_HWP_cont(device_adress=0,
 #                 folder=folder,
 #                 angle_max=180,
@@ -27,6 +28,7 @@ effs = mm.get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp)
 # Do this every Time
 #effs = PM.eval_turn_HWP_cont(folder_effs)
 #PM.POLCOMP_init_meas(folder)
-
+angles = mm.get_Polcomp_Angles(source,waveplates,timestamp)
+print(angles)
 #PM.POLCOMP_execute(folder, effs)
 #PM.measHVPM_eval(folder, folder_effs=folder_effs)

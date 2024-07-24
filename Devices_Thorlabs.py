@@ -59,6 +59,12 @@ class Waveplates(dev.WAVEPLATES):
         self.waveplates["QWP2"].stage.setup_jog(step_size=360,max_velocity=speed)
         self.waveplates["HWP1"].stage.jog("+",kind="builtin")
         self.waveplates["QWP2"].stage.jog("+",kind="builtin")
+
+    def move_like_QWP(self, angle):
+        self.waveplates["QWP1"].move_to(135+angle)
+        self.waveplates["QWP2"].move_to(135+angle)
+        self.waveplates["HWP1"].move_to(112.5+angle)
+
     
     def stop(self):
         for wp in self.waveplates:
@@ -108,11 +114,12 @@ class Timestamp(dev.TIMESTAMP):
         time.sleep(5)
 
 
-    def read(self, time):
+    def read(self, t):
         self.stream = TimeTagger.TimeTagStream(self.tt, 1E9, [1,2,3,4])
-        self.stream.startFor(time*1E12)
+        self.stream.startFor(t*1E12)
+        print("Measuring the next {}s".format(t))
         self.stream.waitUntilFinished()
-
+        print("done")
         data = self.stream.getData()
         self.stream.stop()
         self.ts = np.array([data.getChannels(),data.getTimestamps()])

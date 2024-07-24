@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp):
+def get_Coupling_Efficiency_cont(source, waveplates, timestamp):
     # Measure
     angle_max = 180
     deg_per_sec = 10
@@ -13,10 +13,6 @@ def get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp):
     source.turn_off()
     waveplates.home()
     source.turn_on("V")
-
-    measurement = folder + "coupling_efficiency_{}/".format(
-        time.strftime("%Y%m%d-%H%M%S"))
-    os.mkdir(measurement)
 
     waveplates.jog_like_HWP(deg_per_sec)
     data = timestamp.read(int(angle_max / deg_per_sec))
@@ -97,13 +93,13 @@ def get_Coupling_Efficiency_cont(folder, source, waveplates, timestamp):
 
     plt.show()
 
-    np.savetxt(folder + "effs.txt", np.array([effH, effV, effP, effM]))
 
     return np.array([effH, effV, effP, effM])
 
 
-def get_Polcomp_Angles(folder, source, waveplates, timestamp):
+def get_Polcomp_Angles(source, waveplates, timestamp):
     measurements = []
+    bins = []
     channels = [0, 3]
     measurementTime = 5
     waveplates.move_to(0)
@@ -113,6 +109,7 @@ def get_Polcomp_Angles(folder, source, waveplates, timestamp):
     timestamp.read(measurementTime)
     times, counts = timestamp.get_counts_per_second()
     measurements.append(counts)
+    bins.append(times)
     source.turn_off()
 
     # Measure P using unitary
@@ -120,16 +117,18 @@ def get_Polcomp_Angles(folder, source, waveplates, timestamp):
     timestamp.read(measurementTime)
     times, counts = timestamp.get_counts_per_second()
     measurements.append(counts)
+    bins.append(times)
     source.turn_off()
 
     # Measure H using l4
     # Move "3 Waveplates" such that they represent a single lamba/4 at 0 deg
-    waveplates.move_to_l4()
+    waveplates.move_like_QWP(0)
 
     source.turn_on(channels[0])
     timestamp.read(measurementTime)
     times, counts = timestamp.get_counts_per_second()
     measurements.append(counts)
+    bins.append(times)
     source.turn_off()
 
     # Measure P using l4
@@ -137,10 +136,18 @@ def get_Polcomp_Angles(folder, source, waveplates, timestamp):
     timestamp.read(measurementTime)
     times, counts = timestamp.get_counts_per_second()
     measurements.append(counts)
+    bins.append(times)
     source.turn_off()
 
     # Measure dark counts
     timestamp.read(measurementTime)
     times, counts = timestamp.get_counts_per_second()
     measurements.append(counts)
+    bins.append(times)
+
+    measurements=np.array(measurements)
+    measurements.tofile("measure.bin")
+    bins = np.array(bins)
+    bins.tofile("bins.bin")
+
     return measurements
