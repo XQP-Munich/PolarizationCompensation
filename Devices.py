@@ -48,7 +48,7 @@ class SOURCE(ABC):
 class TIMESTAMP(ABC):
 
     @abstractmethod
-    def read(self, path):
+    def read(self, t):
         pass
 
     @abstractmethod
@@ -57,4 +57,4 @@ class TIMESTAMP(ABC):
 
     @abstractmethod
     def get_counts_per_second(self):
-        return []
+        return [], []

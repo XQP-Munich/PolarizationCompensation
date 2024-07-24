@@ -7,9 +7,13 @@ if not os.path.exists(folder):
     os.mkdir(folder)
 
 # initialize devices
-source = devices.Source()
-waveplates = devices.waveplates
-timestamp = devices.Timestamp()
+qwp2 = devices.K10CR1(55232924, 308.24)
+hwp = devices.K10CR1(55232454, 231.59)
+qwp1 = devices.K10CR1(55232464, 301.01)
+
+waveplates = devices.Waveplates([qwp1, hwp, qwp2])
+source = devices.Alice_LMU()
+timestamp = devices.TimeTaggerUltra()
 
 # Do this ONCE
 # Caracterize Waveplates find 0 pos mark down in devices.py
@@ -17,8 +21,8 @@ timestamp = devices.Timestamp()
 
 # Do this every time it is moved
 # Send any Linear Pos into bob
-effs = mm.get_Coupling_Efficiency_cont(source, waveplates, timestamp)
-print(effs)
+coupling = mm.get_Coupling_Efficiency_cont(source, waveplates, timestamp)
+print(coupling)
 #PM.turn_HWP_cont(device_adress=0,
 #                 folder=folder,
 #                 angle_max=180,
@@ -26,9 +30,7 @@ print(effs)
 #                 stop_at=90)
 
 # Do this every Time
-#effs = PM.eval_turn_HWP_cont(folder_effs)
-#PM.POLCOMP_init_meas(folder)
-angles = mm.get_Polcomp_Angles(source,waveplates,timestamp)
-print(angles)
-#PM.POLCOMP_execute(folder, effs)
-#PM.measHVPM_eval(folder, folder_effs=folder_effs)
+bins, counts = mm.measure_Polcomp_Counts(source, waveplates, timestamp)
+counts.tofile("counts.bin")
+print(counts)
+mm.evaluate_Polcomp_Counts(counts, coupling)

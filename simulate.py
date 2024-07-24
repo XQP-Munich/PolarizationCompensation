@@ -3,6 +3,9 @@ import numpy as np
 from scipy.optimize import brute
 
 import matplotlib.pyplot as plt
+
+printMatrix(qwp(0))
+printMatrix(qwp(180))
 #for i in np.arange(0, 180, 22.5):
 #    printMatrix(qwp(i) @ qwp(i + 90))
 #    print(qwp(i))
@@ -22,7 +25,9 @@ def get_angles(matrix, x0=[0, 0, 0], output=False, first=False):
     r = 8
     if first:
         r = 180
-    res = brute(f, ((a,a+r),(b, b + r), (g, g + r)), Ns=100, full_output=True)
+    res = brute(f, ((a, a + r), (b, b + r), (g, g + r)),
+                Ns=100,
+                full_output=True)
     alpha, beta, gamma = [x % 360 for x in res[0]]
     if output:
         print(
@@ -47,7 +52,11 @@ first = True
 for i in np.arange(0, 181, 180):
     print(i)
     print(positions[-1])
-    a, b, g, e = get_angles(qwp(0), output=True, x0=positions[-1], first=first)
+    a, b, g, e = get_angles(
+        [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]],
+        output=True,
+        x0=positions[-1],
+        first=first)
     positions.append([a, b, g])
     xs.append(i)
     es.append(e)
