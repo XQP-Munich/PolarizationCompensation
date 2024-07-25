@@ -4,15 +4,15 @@ import numpy as np
 
 while True:
     with TimeTagger.createTimeTagger() as tt:
-        tt.setEventDivider(5, 5)
-        tt.setTriggerLevel(5, 1)
-        tt.setSoftwareClock(5, 10_000_000)
+        tt.setEventDivider(6, 5)
+        tt.setTriggerLevel(6, 1)
+        tt.setSoftwareClock(6, 10_000_000)
         tt.setTriggerLevel(-1, -0.5)
         tt.setTriggerLevel(-2, -0.5)
         tt.setTriggerLevel(-3, -0.5)
         tt.setTriggerLevel(-4, -0.5)
         time.sleep(5)
-        stream = TimeTagger.TimeTagStream(tt, 1E9, [1, 2, 3, 4])
+        stream = TimeTagger.TimeTagStream(tt, 1E9, [1, 2, 3, 4, 5])
         stream.startFor(30 * 1E12)
         stream.waitUntilFinished()
         data = stream.getData()
@@ -27,7 +27,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 target_key = [0]
-symbol_map = {"H": 0, "V": 1, "P": 2, "M": 3}
+symbol_map = {"H": 0, "V": 1, "P": 2, "M": 3, "S": 4}
 inv_symbol_map = {v: k for k, v in symbol_map.items()}
 with open("targetKey_QUBEmeasurements.txt", "r") as file:
     for char in file.readline()[:-1]:
@@ -36,9 +36,15 @@ with open("targetKey_QUBEmeasurements.txt", "r") as file:
 dt = 10000
 key_length = 2049
 offset = 0
-chan_offset = [1000, 1000, -5500, 2100]
+chan_offset = [1000, 1000, -5500, 2100, 0]
 #raw_data = np.reshape(np.fromfile("./data/data2.bin", dtype=np.int64), (2, -1))
 raw_data = ts  #[:,int(len(ts/2)):]
+sync_data = raw_data[1][np.where(raw_data[0] == 5)]
+if sync_data.size != 0:
+    print("Sync Chan detected")
+    raw_data[1] -= sync_data[0]
+    raw_data = raw_data[:, np.where(raw_data[1] >= 0)]
+
 meas_time = raw_data[1][-1] - raw_data[1][0]
 
 #raw_data = raw_data[:, :10]
@@ -80,23 +86,35 @@ filter_max = filter_mean + 0.45 * filter_var
 print("Setting filter from {:.0f}ps to {:.0f}ps".format(
     filter_min, filter_max))
 
+data = raw_data.copy()
+channel_masks = lambda i: np.where(data[0] == i + 1)
+for i in range(0, 5):
+    data[1, channel_masks(i)] += offset + chan_offset[i]
+
+phases = data[1] % dt
+for i in range(0, 5):
+    n, _, _ = plt.hist(phases[channel_masks(i)],
+                       bins=100,
+                       alpha=0.4,
+                       label=f"{inv_symbol_map[i]}")
+
+time_mask = np.where(np.logical_and(phases >= filter_min, phases
+                                    <= filter_max))
+data = data[:, time_mask]
+
+# Filter Multiple detections
+data_diff = data[1] // dt
+data_diff = np.diff(data_diff, append=[data_diff[-1] + 1])
+dup_mask = data_diff == 0
+data_diff_zero_right = np.nonzero(dup_mask)[0] + 1
+dup_mask[data_diff_zero_right] = True
+data = data[:, ~dup_mask]
+
+channel_masks = lambda i: np.where(data[0] == i + 1)
+
 for i in range(0, 4):
-    channel_data = raw_data[1][np.where(raw_data[0] == i +
-                                        1)] + offset + chan_offset[i]
-    time_in_symbol = (channel_data % dt)
-
-    phase = channel_data % dt
-    plt.hist(phase, bins=100, alpha=0.4, label=f"{inv_symbol_map[i]}")
-
-    channel_data_filtered = channel_data[np.where(
-        np.logical_and(time_in_symbol >= filter_min, time_in_symbol
-                       <= filter_max))]
-    #phase_filtered = channel_data_filtered % dt
-    #hist_bins = int((filter[1] - filter[0]) / 100)
-    #plt.hist(phase_filtered, bins=20, alpha=0.6, label=f"{inv_symbol_map[i]}")
-    plt.vlines([filter_min, filter_max], 0, 10000)
-
-    pos_in_key = ((channel_data_filtered % (dt * key_length)) / dt).astype(int)
+    pos_in_key = ((data[1, channel_masks(i)] % (dt * key_length)) /
+                  dt).astype(int)
     unique_indices, counts = np.unique(pos_in_key, return_counts=True)
     for id, cnt in zip(unique_indices, counts):
         bins[id][i] += cnt
@@ -166,7 +184,9 @@ for i in range(len(target_key)):
             same += 1
     sames.append(same)
 if (max(sames) == len(target_key)):
-    print("Detected key matches sent key!!")
+    sync_phase = np.mean(data[1][channel_masks(5)] % dt)
+    print("Detected key matches sent key with offset: {} and phase: {}".format(
+        np.argmax(sames), sync_phase))
 else:
     print(len(sames), max(sames), np.argmax(sames))
 
