@@ -26,7 +26,7 @@ while True:
 import numpy as np
 import matplotlib.pyplot as plt
 
-target_key = [0]
+target_key = []
 symbol_map = {"H": 0, "V": 1, "P": 2, "M": 3, "S": 4}
 inv_symbol_map = {v: k for k, v in symbol_map.items()}
 with open("targetKey_QUBEmeasurements.txt", "r") as file:
@@ -34,11 +34,12 @@ with open("targetKey_QUBEmeasurements.txt", "r") as file:
         target_key.append(symbol_map[char])
 
 dt = 10000
-key_length = 2049
+key_length = len(target_key)
 offset = 0
 chan_offset = [1000, 1000, -5500, 2100, 0]
 #raw_data = np.reshape(np.fromfile("./data/data2.bin", dtype=np.int64), (2, -1))
 raw_data = ts  #[:,int(len(ts/2)):]
+
 sync_data = raw_data[1][np.where(raw_data[0] == 5)]
 if sync_data.size != 0:
     print("Sync Chan detected")
@@ -46,10 +47,6 @@ if sync_data.size != 0:
     raw_data = raw_data[:, np.where(raw_data[1] >= 0)]
 
 meas_time = raw_data[1][-1] - raw_data[1][0]
-
-#raw_data = raw_data[:, :10]
-sorted_data = []
-bins = np.zeros((key_length, 4))
 
 print(f"Got {len(raw_data[0])} Events in {meas_time*1E-12}s")
 
@@ -87,13 +84,12 @@ print("Setting filter from {:.0f}ps to {:.0f}ps".format(
     filter_min, filter_max))
 
 data = raw_data.copy()
-channel_masks = lambda i: np.where(data[0] == i + 1)
 for i in range(0, 5):
-    data[1, channel_masks(i)] += offset + chan_offset[i]
+    data[1, np.where(data[0] == i + 1)] += offset + chan_offset[i]
 
 phases = data[1] % dt
 for i in range(0, 5):
-    n, _, _ = plt.hist(phases[channel_masks(i)],
+    n, _, _ = plt.hist(phases[np.where(data[0] == i + 1)],
                        bins=100,
                        alpha=0.4,
                        label=f"{inv_symbol_map[i]}")
@@ -110,10 +106,9 @@ data_diff_zero_right = np.nonzero(dup_mask)[0] + 1
 dup_mask[data_diff_zero_right] = True
 data = data[:, ~dup_mask]
 
-channel_masks = lambda i: np.where(data[0] == i + 1)
-
+bins = np.zeros((key_length, 4))
 for i in range(0, 4):
-    pos_in_key = ((data[1, channel_masks(i)] % (dt * key_length)) /
+    pos_in_key = ((data[1, np.where(data[0] == i + 1)] % (dt * key_length)) /
                   dt).astype(int)
     unique_indices, counts = np.unique(pos_in_key, return_counts=True)
     for id, cnt in zip(unique_indices, counts):
@@ -184,7 +179,7 @@ for i in range(len(target_key)):
             same += 1
     sames.append(same)
 if (max(sames) == len(target_key)):
-    sync_phase = np.mean(data[1][channel_masks(5)] % dt)
+    sync_phase = np.mean(data[1][np.where(data[0] == 5)] % dt)
     print("Detected key matches sent key with offset: {} and phase: {}".format(
         np.argmax(sames), sync_phase))
 else:
