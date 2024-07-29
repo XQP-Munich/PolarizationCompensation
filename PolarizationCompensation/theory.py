@@ -207,7 +207,7 @@ def Q_Channel(x):
     """
 
     α, β, γ = x
-    J_Q = np.matmul(np.matmul(lin_ret(γ, np.pi), lin_ret(β, np.pi / 2)),
+    J_Q = np.matmul(np.matmul(lin_ret(γ, np.pi/2), lin_ret(β, np.pi)),
                     lin_ret(α, np.pi / 2))
 
     #J_Q = np.matmul(np.matmul(lin_ret(γ, np.pi / 2), lin_ret(β, np.pi)),

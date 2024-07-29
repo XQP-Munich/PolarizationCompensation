@@ -10,7 +10,7 @@ def measure_Coupling_Efficiency_cont(source, waveplates, timestamp):
 
     source.turn_off()
     waveplates.home()
-    source.turn_on("V")
+    source.turn_on(1)
 
     waveplates.jog_like_HWP(deg_per_sec)
     timestamp.read(int(angle_max / deg_per_sec))
@@ -94,7 +94,7 @@ def evaluate_Coupling_Efficiency(times, counts):
 
 
 def get_Coupling_Efficiency_cont(source, waveplates, timestamp):
-    times, counts = timestamp.get_counts_per_second(source, waveplates,
+    times, counts = measure_Coupling_Efficiency_cont(source, waveplates,
                                                     timestamp)
     return evaluate_Coupling_Efficiency(times, counts)
 
@@ -102,7 +102,7 @@ def get_Coupling_Efficiency_cont(source, waveplates, timestamp):
 def measure_Polcomp_Counts(source, waveplates, timestamp):
     measurements = []
     bins = []
-    channels = [0, 3]
+    channels = [1,3]
     measurementTime = 5
     waveplates.move_to(0)
 
@@ -196,14 +196,17 @@ def evaluate_Polcomp_Counts(counts, coupling):
     matrix = measurement_statistics
 
     v1 = [
-        matrix[0][0] - matrix[0][1], matrix[0][2] - matrix[0][3],
-        matrix[0][4] - matrix[0][5]
+        (matrix[0][0] - matrix[0][1])/(matrix[0][0]+matrix[0][1]), (matrix[0][3] - matrix[0][2])/(matrix[0][3]+matrix[0][2]),
+        (matrix[0][4] - matrix[0][5])/(matrix[0][4]+matrix[0][5])
     ]
     v2 = [
-        matrix[1][0] - matrix[1][1], matrix[1][2] - matrix[1][3],
-        matrix[1][4] - matrix[1][5]
+        (matrix[1][0] - matrix[1][1])/(matrix[1][0]+matrix[1][1]), (matrix[1][3] - matrix[1][2])/(matrix[1][3]+matrix[1][2]),
+        (matrix[1][4] - matrix[1][5])/(matrix[1][4]+matrix[1][5])
     ]
+
+    print(v1,v2)
     a = angle_between_stokes_vectors(v1, v2)
+    print(a)
 
     # Create a zero row with the same number of columns as your matrix
     zero_row = np.zeros(matrix.shape[1])

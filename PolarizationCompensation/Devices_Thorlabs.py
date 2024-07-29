@@ -30,8 +30,12 @@ class K10CR1(dev.WAVEPLATE):
             except:
                 print("No Device at /dev/ttyUSB{}".format(i))
 
-    def move_to(self, pos):
+    def move_to(self, pos, block=True):
         self.stage.move_to(pos + self.zero_pos)
+        if block:
+            self.wait_move()
+    
+    def wait_move(self):
         self.stage.wait_move()
 
     def jog(self, direction, speed):
@@ -57,7 +61,7 @@ class Waveplates(dev.WAVEPLATES):
     def jog_like_HWP(self, speed=10):
         self.move_to([0, 0, 90])
         print("Setting jog Params")
-        self.waveplates[1].stage.setup_jog(step_size=360,
+        self.waveplates[1].stage.setup_jog(step_size=360/2,
                                            max_velocity=speed / 2)
         self.waveplates[2].stage.setup_jog(step_size=360, max_velocity=speed)
         print("Start Jog")
@@ -73,16 +77,16 @@ class Waveplates(dev.WAVEPLATES):
 
     def move_to(self, pos):
         print("Moving Waveplates to {}".format(pos))
-        if isinstance(pos, list):
+        if isinstance(pos, list) or isinstance(pos, np.ndarray):
             for i, wp in enumerate(self.waveplates):
-                wp.stage.move_to(pos[i])
+                wp.move_to(pos[i], block=False)
         else:
             for wp in self.waveplates:
-                wp.stage.move_to(pos)
+                wp.move_to(pos,block=False)
 
         for wp in self.waveplates:
-            wp.stage.wait_move()
-        print("done")
+            wp.wait_move()
+        print("done")   
 
     def home(self):
         print("Homing Waveplates")
@@ -102,19 +106,27 @@ class Alice_LMU(dev.SOURCE):
         if aliceSettings:
             self.aliceSettings = aliceSettings
         else:
-            self.aliceSettings = [[2, 255, 255, 100, 175],
-                                  [2, 255, 255, 100, 175],
-                                  [2, 255, 255, 100, 175],
-                                  [2, 255, 255, 100, 175]]
+            # self.aliceSettings = [[2, 255, 255, 100, 175],
+            #                       [2, 206, 255, 100, 175],
+            #                       [2, 230, 255, 100, 175],
+            #                       [2, 163, 255, 100, 175]]
+            
+            self.aliceSettings = [[3, 211, 255, 100, 175],
+                                  [2, 236, 255, 100, 175],
+                                  [4, 255, 255, 100, 175],
+                                  [2, 197, 255, 100, 172]]
 
     def turn_on(self, pol):
+        print("Turn on pol: {}".format(pol))
         self._send_command(
-            self.commandLine.format(pol, *self.aliceSettings[pol]))
+            self.commandLine.format(pol+1, *self.aliceSettings[pol]))
 
     def turn_off(self):
+        print("Turning off Laser")
         self._send_command(self.commandLine.format("-1", *[0, 0, 0, 0, 0]))
 
     def _send_command(self, command):
+        print("sending command:\n{}".format(command))
         if not self.host == "local":
             return self._send_command_ssh(command)
 
@@ -148,9 +160,9 @@ class TimeTaggerUltra(dev.TIMESTAMP):
     def __init__(self):
 
         self.tt = TimeTagger.createTimeTagger()
-        self.tt.setEventDivider(5, 10)
-        self.tt.setTriggerLevel(5, 1)
-        self.tt.setSoftwareClock(5, 10_000_000)
+        self.tt.setEventDivider(6, 1)
+        self.tt.setTriggerLevel(6, 0.25)
+        self.tt.setSoftwareClock(6, 10_000_000)
         self.tt.setTriggerLevel(-1, -0.5)
         self.tt.setTriggerLevel(-2, -0.5)
         self.tt.setTriggerLevel(-3, -0.5)

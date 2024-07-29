@@ -1,6 +1,6 @@
 import os
-import Measurements as mm
-import Devices_Thorlabs as devices
+import PolarizationCompensation.Measurements as mm
+import PolarizationCompensation.Devices_Thorlabs as devices
 
 folder = "./data/"
 if not os.path.exists(folder):
@@ -33,4 +33,6 @@ print(coupling)
 bins, counts = mm.measure_Polcomp_Counts(source, waveplates, timestamp)
 counts.tofile("counts.bin")
 print(counts)
-mm.evaluate_Polcomp_Counts(counts, coupling)
+angles, loss, stokesangles = mm.evaluate_Polcomp_Counts(counts, coupling)
+print(angles, loss, stokesangles)
+waveplates.move_to(angles)
