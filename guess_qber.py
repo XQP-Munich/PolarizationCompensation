@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import time, sys, os
+import time, sys, os, shutil
 import numpy as np
 import matplotlib.pyplot as plt
 import PolarizationCompensation.Devices_Thorlabs as devices
@@ -27,7 +27,7 @@ channels = {
         "edge": -1,
         "trigger": -0.5
     },
-    "SYC": {
+    "SYNC": {
         "ch": 5,
         "edge": 1,
         "trigger": 0.25
@@ -51,29 +51,37 @@ def load_ts(path):
 
 
 if __name__ == "__main__":
-    filename = "./data/measure_qber_" + time.strftime("%Y%m%d-%H%M%S") + ".bin"
-    for i, arg in enumerate(sys.argv):
-        if (arg == "-f"):
-            filename = sys.argv[i + 1]
+    folder = "./data/measure_qber_" + time.strftime("%Y%m%d-%H%M%S") + "/"
+    file = sys.argv[1]
+    if not os.path.exists(file):
+        print("Cannot open {}".format(file))
+        sys.exit()
+    filename, file_extension = os.path.splitext(file)
 
-    if not os.path.isfile(filename):
+    if file_extension == ".txt":
+        folder = "./data/measure_qber_" + time.strftime("%Y%m%d-%H%M%S") + "/"
+        key_filename = folder + "target_key.txt"
+        os.makedirs(folder)
+        shutil.copyfile(file, key_filename)
         # Turn on Alice:
         source = devices.Alice_LMU()
         source.turn_on()
+        source.send_key(key_filename)
 
         # Measure clicks using Timetagger:
         timestamp = devices.TimeTaggerUltra(channels)
         ts = timestamp.read(30)
-        save_ts(ts, filename)
+        save_ts(ts, filename + ".bin")
     else:
-        ts = load_ts(filename)
+        ts = load_ts(file)
+        key_filename = filename + ".txt"
 
     # Evaluate
     symbol_map = {k: v["ch"] for k, v in channels.items() if k != "CLK"}
     inv_symbol_map = {v: k for k, v in symbol_map.items()}
 
     target_key = []
-    with open("./data/targetKey_QUBEmeasurements.txt", "r") as file:
+    with open(key_filename, "r") as file:
         for char in file.readline()[:-1]:
             target_key.append(symbol_map[char] - 1)
 
@@ -81,10 +89,9 @@ if __name__ == "__main__":
     key_length = len(target_key)
     offset = 0
     chan_offset = [1000, 1000, -5500, 2100, 0]
-    #chan_offset = [0, 0, -6000, 0, 0]
     raw_data = ts.view(np.int64)  #[:,int(len(ts/2)):]
-
-    sync_data = raw_data[1][raw_data[0] == 5]
+    raw_data[1] = raw_data[1]
+    sync_data = raw_data[1][raw_data[0] == channels["SYNC"]["ch"]]
     meas_time = raw_data[1][-1] - raw_data[1][0]
 
     print(f"Got {len(raw_data[0])} Events in {meas_time*1E-12}s")
@@ -126,8 +133,8 @@ if __name__ == "__main__":
     filter_mean = np.mean(filter_means)
     filter_var = np.mean(filter_vars)
 
-    filter_min = filter_mean - 0.35 * filter_var
-    filter_max = filter_mean + 0.45 * filter_var
+    filter_min = filter_mean - 0.55 * filter_var
+    filter_max = filter_mean + 0.65 * filter_var
     print("Setting filter from {:.0f}ps to {:.0f}ps".format(
         filter_min, filter_max))
 
@@ -136,11 +143,16 @@ if __name__ == "__main__":
         data[1, data[0] == i + 1] += offset + chan_offset[i]
 
     phases = data[1] % dt
+    plt.figure(figsize=(5, 3), dpi=400)
+    nmax = []
     for i in range(0, 5):
         n, _, _ = plt.hist(phases[data[0] == i + 1],
                            bins=100,
                            alpha=0.4,
                            label=f"{inv_symbol_map[i+1]}")
+        nmax.append(np.max(n))
+    plt.vlines(filter_min, 0, max(nmax))
+    plt.vlines(filter_max, 0, max(nmax))
 
     time_mask = np.logical_or(
         np.logical_and(phases >= filter_min, phases <= filter_max),
@@ -160,6 +172,7 @@ if __name__ == "__main__":
     key = []
     qbers = []
     det_probs = []
+    num_sifted_det = 0
     for i in range(key_length):
         count = bins[i]
         diff1 = count[0] - count[1]
@@ -176,6 +189,7 @@ if __name__ == "__main__":
                 val = 1
                 qber = count[0] / (count[0] + count[1])
                 det_prob = count[1] / keys_sent
+            num_sifted_det += count[0] + count[1]
         else:
             if diff2 > 0:
                 val = 2
@@ -185,6 +199,7 @@ if __name__ == "__main__":
                 val = 3
                 qber = count[2] / (count[2] + count[3])
                 det_prob = count[3] / keys_sent
+            num_sifted_det += count[2] + count[3]
         key.append(val)
         qbers.append(qber)
         det_probs.append(det_prob)
@@ -204,8 +219,7 @@ if __name__ == "__main__":
         np.std(qbers) * 100))
     print("Max Qber: {:.2f}% at {}".format(
         np.max(qbers) * 100, bins[np.argmax(qbers)]))
-    plt.legend()
-    plt.show()
+    print("Sifted key Rate: {:.2f}".format(num_sifted_det / meas_time / 1E-12))
     temp_key = target_key + target_key
     index_offset = 0
     sames = []
@@ -216,6 +230,15 @@ if __name__ == "__main__":
             if (key[j] == comp_key[j]):
                 same += 1
         sames.append(same)
+
+    plt.legend()
+    plt.title(
+        "Pulses with mean QBER={:.2f}%\nSifted key rate={:.2f}Kb/s".format(
+            np.mean(qbers) * 100, num_sifted_det / meas_time / 1E-12 / 1000))
+    plt.xlabel("Detection time in ps")
+    plt.ylabel("Number of detections")
+    plt.tight_layout()
+
     if (max(sames) == len(target_key)):
         sync_phases = data[1][data[0] == 5] % dt
         if len(sync_phases) > 0:
@@ -226,12 +249,18 @@ if __name__ == "__main__":
         else:
             print("Detected key matches sent key with offset: {}".format(
                 np.argmax(sames)))
+        plt.savefig(filename + ".png")
 
     else:
         print(len(sames), max(sames), np.argmax(sames))
 
         shift_key = temp_key[np.argmax(sames):np.argmax(sames) +
                              len(target_key)]
+        sumcounts = [[], [], [], []]
         for i in range(len(target_key)):
             if (key[i] != shift_key[i]):
-                print(i, key[i], shift_key[i], bins[i])
+                print(i, key[i], shift_key[i], bins[i], np.sum(bins[i]))
+            sumcounts[key[i]].append(np.sum(bins[i]))
+        for i in range(4):
+            print(i, np.mean(sumcounts[i]))
+        plt.show()

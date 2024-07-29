@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import subprocess
+import os
 
 import PolarizationCompensation.Devices as dev
 
@@ -101,6 +102,7 @@ class Alice_LMU(dev.SOURCE):
     def __init__(self, host="local", aliceSettings=None):
         self.commandLine = "alice-control -c {} -b {} -ms {} -md {} -da {} -db {}"
         self.host = host
+        self.channel_map = {"H": 1, "V": 2, "P": 3, "M": 4}
         if aliceSettings:
             self.aliceSettings = aliceSettings
         else:
@@ -109,20 +111,23 @@ class Alice_LMU(dev.SOURCE):
             #                       [2, 230, 255, 100, 175],
             #                       [2, 163, 255, 100, 175]]
 
-            self.aliceSettings = [[3, 211, 255, 100, 175],
-                                  [2, 236, 255, 100, 175],
-                                  [4, 255, 255, 100, 175],
-                                  [2, 197, 255, 100, 172]]
+            self.aliceSettings = {
+                "H": [3, 211, 255, 100, 175],
+                "V": [2, 236, 255, 100, 175],
+                "P": [4, 255, 255, 100, 175],
+                "M": [2, 197, 255, 100, 172]
+            }
 
     def turn_on(self, pol=None):
         if not pol:
-            pol = [1, 2, 3, 4]
+            pol = ["H", "V", "P", "M"]
         else:
             pol = [pol]
         for p in pol:
             print("Turn on pol: {}".format(p))
             self._send_command(
-                self.commandLine.format(p + 1, *self.aliceSettings[p]))
+                self.commandLine.format(self.channel_map[p],
+                                        *self.aliceSettings[p]))
 
     def turn_off(self):
         print("Turning off Laser")
@@ -156,6 +161,37 @@ class Alice_LMU(dev.SOURCE):
             raise Exception(f"Error {error.decode('utf-8')}")
 
         return output.decode('utf-8')
+
+    def txt_to_key(self, filename):
+        data = []
+        conv = {"H": 2, "V": 3, "P": 6, "M": 7, "h": 0, "v": 1, "p": 4, "m": 5}
+        with open(filename, "r") as file:
+            for line in file.readlines():
+                line = line.rstrip("\n")
+                print(len(line))
+                first = True
+                byte = np.ubyte(0)
+                for char in line:
+                    if first:
+                        byte = np.ubyte(conv[char])
+                    else:
+                        byte = np.bitwise_or(byte, np.ubyte(16 * conv[char]))
+                        data.append(byte)
+                    first = not first
+
+        data = np.array(data)
+        filename, file_extension = os.path.splitext(filename)
+        filename = filename + ".key"
+        data.tofile(filename)
+        return filename
+
+    def send_key(self, key):
+        filename, file_extension = os.path.splitext(key)
+        if file_extension == ".key":
+            self._send_command("ram-playback -f {}".format(key))
+        else:
+            self._send_command("ram-playback -f {}".format(
+                self.txt_to_key(key)))
 
 
 class TimeTaggerUltra(dev.TIMESTAMP):

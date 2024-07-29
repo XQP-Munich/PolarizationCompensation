@@ -94,11 +94,7 @@ def hwp(theta):
     return retarder(theta, np.pi)
 
 
-# Math
-
-
 def my_sin(x, a, omega, phi, c):
-
     return a * np.sin(omega * x + phi) + c
 
 
@@ -117,22 +113,13 @@ def fit_my_sin(steps, signal, p0=0):
                            2 * np.pi)
         guess_offset = np.mean(signal)
         p0 = [guess_a, guess_omega, guess_phi, guess_offset]
-        print(f"p0 = {p0}")
 
     p, p_cov = so.curve_fit(my_sin, steps, signal, p0=p0)
 
     p[0] *= normalization
     p[2] = np.mod(p[2], 2 * np.pi)
     p[3] *= normalization
-    print(f"pfit = {p}")
     return p
-
-
-H = (1, 0)
-V = (0, 1)
-P = (1 / np.sqrt(2), 1 / np.sqrt(2))
-M = (1 / np.sqrt(2), -1 / np.sqrt(2))
-Set_In = [H, V, P, M]
 
 
 def produce_density_matrix(vec):
@@ -142,27 +129,6 @@ def produce_density_matrix(vec):
     rho = np.outer(vec, np.conjugate(vec))
 
     return rho
-
-
-def detection_statistics(U, Jones_in):
-    """
-    Given unitary transformation U, and Jones input state, detections statistics for measuring H, V, P and M will
-    be given in this order. 
-    """
-    rho = produce_density_matrix(Jones_in)
-
-    rho_twist = np.matmul(np.matmul(U, rho), np.linalg.inv(U))
-
-    P = [
-        np.abs(rho_twist[0][0]),
-        np.abs(rho_twist[1][1]),
-        1 / 2 * np.abs(rho_twist[0][0] + rho_twist[1][1] + rho_twist[0][1] +
-                       rho_twist[1][0]),
-        1 / 2 * np.abs(rho_twist[0][0] + rho_twist[1][1] - rho_twist[0][1] -
-                       rho_twist[1][0])
-    ]
-
-    return P
 
 
 def detection_statistics_HVPMRL(U, Jones_in):
@@ -191,7 +157,6 @@ def lin_ret(θ, η):
     """
     c_t = np.cos(θ)
     s_t = np.sin(θ)
-    s_e = np.sin(η)
     exp_i_e = np.exp(1j * η)
 
     J = np.exp(-1j * η / 2) * np.array([[
@@ -201,38 +166,29 @@ def lin_ret(θ, η):
     return J
 
 
-def Q_Channel(x):
-    """
-    Returns unitary transformation caused by two quater and one half-wave-plate. 
-    """
-
-    α, β, γ = x
-    J_Q = np.matmul(np.matmul(lin_ret(γ, np.pi/2), lin_ret(β, np.pi)),
-                    lin_ret(α, np.pi / 2))
-
-    #J_Q = np.matmul(np.matmul(lin_ret(γ, np.pi / 2), lin_ret(β, np.pi)),
-    #                lin_ret(α, np.pi / 2))
-
-    return J_Q
-
-
-def fit_Q_Channel(measurement):
+def fit_Q_Channel(measurement, waveplate_setup):
+    retarder_map = {"HWP": np.pi, "QWP": np.pi / 2}
+    q_Channel = lambda x: lin_ret(x[2], retarder_map[waveplate_setup[
+        2]]) @ lin_ret(x[1], retarder_map[waveplate_setup[1]]) @ lin_ret(
+            x[0], retarder_map[waveplate_setup[0]])
+    H = (1, 0)
+    V = (0, 1)
+    P = (1 / np.sqrt(2), 1 / np.sqrt(2))
+    M = (1 / np.sqrt(2), -1 / np.sqrt(2))
+    input_States = [H, V, P, M]
 
     def objective(x):
         error = 0
         count = 0
-        for state in Set_In:
+        for state in input_States:
             error += sum(
                 np.abs(
-                    detection_statistics_HVPMRL(np.linalg.inv(Q_Channel(
+                    detection_statistics_HVPMRL(np.linalg.inv(q_Channel(
                         x)), state) - measurement[count])**2)
             count += 1
-
         return error
 
-    bounds = [(0, np.pi), (0, np.pi), (0, np.pi / 2)]
-    #bounds = [(0, np.pi), (0, np.pi / 2), (0, np.pi)]
-    #bounds = [(0, 0, 0), (np.pi, np.pi, np.pi/2)]
+    bounds = [(0, np.pi), (0, np.pi), (0, np.pi)]
 
     measurement = np.array(measurement)
     alpha_s = np.linspace(0, np.pi, 5)
@@ -241,9 +197,7 @@ def fit_Q_Channel(measurement):
     Roots = []
     funs = []
     for x0 in itertools.product(alpha_s, beta_s, gamma_s):
-
         x0 = np.array(x0)
-
         Root = so.minimize(objective, x0=x0, bounds=bounds)
         Roots.append(Root.x)
         funs.append(Root.fun)
@@ -253,22 +207,10 @@ def fit_Q_Channel(measurement):
 
     x = Roots[min_fun_ind]
     fun = funs[min_fun_ind]
-    print('best angles set: ', x)
-    print('best loss: ', funs[min_fun_ind])
-
-    ##### Virtual Quantum Channel to see if Output fits Measurement
-    sim_measurement = []
-    for state in Set_In:
-        sim_measurement.append(detection_statistics(Q_Channel(x), state))
-
-    sim_measurement = np.array(sim_measurement)
-
-    #print('Measurement after Quantum Channel\n', measurement)
-    #print('Measurement after fit Quantum Channel\n', sim_measurement)
 
     angles = np.rad2deg(x)
 
-    if funs[min_fun_ind] > .005:
+    if funs[min_fun_ind] > .1:
         print("Optimization failed.")
 
     return angles, fun
