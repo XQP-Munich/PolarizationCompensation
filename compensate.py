@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import sys, os, time
 import numpy as np
 import PolarizationCompensation.Measurements as mm
