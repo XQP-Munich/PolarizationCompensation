@@ -2,16 +2,14 @@ import numpy as np
 import time
 import subprocess
 
-from pylablib.devices import Thorlabs
-import TimeTagger
-
-import Devices as dev
+import PolarizationCompensation.Devices as dev
 
 
 # Class/Function definition
 class K10CR1(dev.WAVEPLATE):
 
     def __init__(self, address, zero_pos):
+        from pylablib.devices import Thorlabs
         self.address = address
         self.zero_pos = zero_pos
         print("Looking for Motor with id={}".format(address))
@@ -34,7 +32,7 @@ class K10CR1(dev.WAVEPLATE):
         self.stage.move_to(pos + self.zero_pos)
         if block:
             self.wait_move()
-    
+
     def wait_move(self):
         self.stage.wait_move()
 
@@ -61,7 +59,7 @@ class Waveplates(dev.WAVEPLATES):
     def jog_like_HWP(self, speed=10):
         self.move_to([0, 0, 90])
         print("Setting jog Params")
-        self.waveplates[1].stage.setup_jog(step_size=360/2,
+        self.waveplates[1].stage.setup_jog(step_size=360 / 2,
                                            max_velocity=speed / 2)
         self.waveplates[2].stage.setup_jog(step_size=360, max_velocity=speed)
         print("Start Jog")
@@ -82,11 +80,11 @@ class Waveplates(dev.WAVEPLATES):
                 wp.move_to(pos[i], block=False)
         else:
             for wp in self.waveplates:
-                wp.move_to(pos,block=False)
+                wp.move_to(pos, block=False)
 
         for wp in self.waveplates:
             wp.wait_move()
-        print("done")   
+        print("done")
 
     def home(self):
         print("Homing Waveplates")
@@ -110,16 +108,21 @@ class Alice_LMU(dev.SOURCE):
             #                       [2, 206, 255, 100, 175],
             #                       [2, 230, 255, 100, 175],
             #                       [2, 163, 255, 100, 175]]
-            
+
             self.aliceSettings = [[3, 211, 255, 100, 175],
                                   [2, 236, 255, 100, 175],
                                   [4, 255, 255, 100, 175],
                                   [2, 197, 255, 100, 172]]
 
-    def turn_on(self, pol):
-        print("Turn on pol: {}".format(pol))
-        self._send_command(
-            self.commandLine.format(pol+1, *self.aliceSettings[pol]))
+    def turn_on(self, pol=None):
+        if not pol:
+            pol = [1, 2, 3, 4]
+        else:
+            pol = [pol]
+        for p in pol:
+            print("Turn on pol: {}".format(p))
+            self._send_command(
+                self.commandLine.format(p + 1, *self.aliceSettings[p]))
 
     def turn_off(self):
         print("Turning off Laser")
@@ -157,42 +160,57 @@ class Alice_LMU(dev.SOURCE):
 
 class TimeTaggerUltra(dev.TIMESTAMP):
 
-    def __init__(self):
+    def __init__(self, channels):
+        import TimeTagger
 
+        self.channel_dict = channels
+        self.channels_measure = [
+            channels[c]["ch"] for c in channels if c != "CLK"
+        ]
         self.tt = TimeTagger.createTimeTagger()
-        self.tt.setEventDivider(6, 1)
-        self.tt.setTriggerLevel(6, 0.25)
-        self.tt.setSoftwareClock(6, 10_000_000)
-        self.tt.setTriggerLevel(-1, -0.5)
-        self.tt.setTriggerLevel(-2, -0.5)
-        self.tt.setTriggerLevel(-3, -0.5)
-        self.tt.setTriggerLevel(-4, -0.5)
+        for key in channels:
+            self.tt.setTriggerLevel(
+                channels[key]["ch"] * channels[key]["edge"],
+                channels[key]["trigger"])
+            if key == "CLK":
+                self.tt.setEventDivider(channels[key]["ch"], 1)
+                self.tt.setSoftwareClock(channels[key]["ch"], 10_000_000)
+
         time.sleep(5)
 
     def read(self, t):
-        self.stream = TimeTagger.TimeTagStream(self.tt, 1E9, [1, 2, 3, 4])
-        self.stream.startFor(t * 1E12)
-        print("Measuring the next {}s".format(t))
-        self.stream.waitUntilFinished()
-        print("done")
-        data = self.stream.getData()
-        self.stream.stop()
-        self.ts = np.array([data.getChannels(), data.getTimestamps()])
+        import TimeTagger
+
+        try_count = 0
+        while True:
+            try_count += 1
+            self.stream = TimeTagger.TimeTagStream(self.tt, 1E9,
+                                                   self.channels_measure)
+            self.stream.startFor(t * 1E12)
+            print("Measuring the next {}s".format(t))
+            self.stream.waitUntilFinished()
+            print("Done")
+            data = self.stream.getData()
+            self.stop()
+            scs = self.tt.getSoftwareClockState()
+            if scs.error_counter == 0:
+                self.ts = np.array([data.getChannels(), data.getTimestamps()])
+                return self.ts
+            print("Clock errors, trying again!")
+            time.sleep(5)
+            if try_count == 5:
+                Exception("To many clock erros")
 
     def stop(self):
         self.stream.stop()
 
     def get_counts_per_second(self):
         bins = np.arange(self.ts[1][0], self.ts[1][-1], 1E12)
-        print(bins)
         cps = []
         for i in range(0, 4):
             channel_data = self.ts[1][np.where(self.ts[0] == i + 1)]
             inds = np.digitize(channel_data, bins)
-            print(inds)
             _, counts = np.unique(inds, return_counts=True)
-            print(counts)
             cps.append(counts)
         cps = np.transpose(np.array(cps))
-        print(cps)
         return bins, cps
