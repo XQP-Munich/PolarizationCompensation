@@ -37,40 +37,48 @@ class K10CR1(dev.WAVEPLATE):
     def wait_move(self):
         self.stage.wait_move()
 
-    def jog(self, direction, speed):
-        input("[Waveplate] Please start Waveplate {}"
-              " jog in {} direction with speed {}°/s".format(
-                  self.address, direction, speed))
-
     def stop(self):
         self.stage.stop()
 
-    def home(self):
-        print("homing")
+    def home(self, block=True):
+        print("Homing")
         self.stage.home(sync=False)
+        if block:
+            self.wait_home()
+
+    def wait_home(self):
         self.stage.wait_for_home()
-        print("homing complete")
+        print("Homing complete")
+
+    def setup_jog(self, speed, limit=720):
+        self.stage.setup_jog(step_size=limit, max_velocity=speed)
+
+    def jog(self, direction="+"):
+        self.stage.jog(direction, kind="builtin")
 
 
 class Waveplates(dev.WAVEPLATES):
 
-    def __init__(self, waveplates):
+    def __init__(self, waveplates, hwp_angle0, hwp_speed, qwp_angle0):
         self.waveplates = waveplates
+        self.hwp_angle0 = hwp_angle0
+        self.hwp_speed = hwp_speed
+        self.qwp_angle0 = qwp_angle0
 
-    def jog_like_HWP(self, speed=10):
-        self.move_to([0, 0, 90])
-        print("Setting jog Params")
-        self.waveplates[1].stage.setup_jog(step_size=360 / 2,
-                                           max_velocity=speed / 2)
-        self.waveplates[2].stage.setup_jog(step_size=360, max_velocity=speed)
-        print("Start Jog")
-        self.waveplates[1].stage.jog("+", kind="builtin")
-        self.waveplates[2].stage.jog("+", kind="builtin")
+    def jog_like_HWP(self, speed):
+        self.move_to(self.hwp_angle0)
+        print("Setting jog params")
+        for i, wp in enumerate(self.waveplates):
+            wp.setup_jog(step_size=360, max_velocity=self.hwp_speed[i] * speed)
+        print("Start jog")
+        for wp in self.waveplates:
+            wp.jog()
 
     def move_like_QWP(self, angle):
-        self.move_to([135 + angle, 112.5 + angle, 135 + angle])
+        self.move_to([x + angle for x in self.qwp_angle0])
 
     def stop(self):
+        print("Stopping waveplates")
         for wp in self.waveplates:
             wp.stop()
 
@@ -88,13 +96,11 @@ class Waveplates(dev.WAVEPLATES):
         print("done")
 
     def home(self):
-        print("Homing Waveplates")
         for wp in self.waveplates:
-            wp.stage.home(sync=False)
-        print("Waiting for Home")
+            wp.home(block=False)
+        print("Waiting for home")
         for wp in self.waveplates:
-            wp.stage.wait_for_home()
-        print("Homing complete")
+            wp.wait_home()
 
 
 class Alice_LMU(dev.SOURCE):

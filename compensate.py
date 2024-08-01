@@ -38,6 +38,9 @@ channels = {
     }
 }
 
+send_pol = ["V", "M"]
+waveplate_setup = ["QWP", "HWP", "QWP"]
+
 if __name__ == "__main__":
     symbol_map = {k: v["ch"] - 1 for k, v in channels.items() if k != "CLK"}
     inv_symbol_map = {v: k for k, v in symbol_map.items()}
@@ -55,7 +58,10 @@ if __name__ == "__main__":
         hwp = devices.K10CR1(55232454, 231.59)
         qwp1 = devices.K10CR1(55232464, 301.01)
 
-        waveplates = devices.Waveplates([qwp1, hwp, qwp2])
+        waveplates = devices.Waveplates([qwp1, hwp, qwp2],
+                                        hwp_angle0=[0, 0, 90],
+                                        hwp_speed=[1, 1, 1],
+                                        qwp_angle0=[135, 112.5, 135])
         source = devices.Alice_LMU()
         timestamp = devices.TimeTaggerUltra(channels)
 
@@ -70,8 +76,6 @@ if __name__ == "__main__":
     coupling = mm.evaluate_Coupling_Efficiency(counts, inv_symbol_map, path)
     print("Coupling:\n", coupling)
 
-    send_pol = ["V", "M"]
-    waveplate_setup = ["QWP", "HWP", "QWP"]
     if not folder_exists:
         # Do this every Time
         bins, counts = mm.measure_Polcomp_Counts(source, waveplates, timestamp,
