@@ -58,6 +58,7 @@ if __name__ == "__main__":
         hwp = devices.K10CR1(55232454, 231.59)
         qwp1 = devices.K10CR1(55232464, 301.01)
 
+        # get values of hwp_angle0,hwp_speed,qwp_angle from simulation script
         waveplates = devices.Waveplates([qwp1, hwp, qwp2],
                                         hwp_angle0=[0, 0, 90],
                                         hwp_speed=[1, 1, 1],
