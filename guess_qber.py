@@ -102,9 +102,9 @@ if __name__ == "__main__":
         print("Sync Chan detected")
         raw_data[1] -= sync_data[1]
         raw_data = raw_data[:, raw_data[1] >= 0]
-        meas_time = raw_data[1][-1] - raw_data[1][0]
+        meas_time = (raw_data[1][-1] - raw_data[1][0]) * 1E-12
         print("Got {:.2e} Events in {:.0f}s after first SYNC".format(
-            len(raw_data[0]), meas_time * 1E-12))
+            len(raw_data[0]), meas_time))
     else:
         print("Got {:.2e} Events in {:.0f}s".format(len(raw_data[0]),
                                                     meas_time))
@@ -151,6 +151,15 @@ if __name__ == "__main__":
     plt.figure(figsize=(5, 3), dpi=400)
     nmax = []
     for i in range(0, 5):
+        if i == 4:
+            phase = phases[data[0] == i + 1]
+            weight = len(phase) / (len(phases) - len(phase))
+            plt.hist(phase,
+                     bins=100,
+                     alpha=0.4,
+                     label=inv_symbol_map[i + 1],
+                     weights=np.ones(len(phase)) / weight)
+            continue
         n, _, _ = plt.hist(phases[data[0] == i + 1],
                            bins=100,
                            alpha=0.4,
@@ -176,7 +185,7 @@ if __name__ == "__main__":
         for id, cnt in zip(unique_indices, counts):
             bins[id][i] += cnt
 
-    keys_sent = meas_time / (key_length * dt)
+    keys_sent = meas_time / (key_length * dt * 1E-12)
 
     key = []
     qbers = []
@@ -222,17 +231,17 @@ if __name__ == "__main__":
     det_probs_pol = np.array(det_probs_pol)
     for i in range(4):
         print(
-            "Detection Prob for {}: {:.6f}% with a std of {:.8f} relative {:.2f}"
-            .format(inv_symbol_map[i + 1], det_probs_pol[i][0] * 100,
-                    det_probs_pol[i][1] * 100,
-                    det_probs_pol[i][0] / np.max(det_probs_pol[:, 0])))
+            "Detection Prob for {}: {:.6f}% with a std of {:.8f} rel: {:.2f}".
+            format(inv_symbol_map[i + 1], det_probs_pol[i][0] * 100,
+                   det_probs_pol[i][1] * 100,
+                   det_probs_pol[i][0] / np.max(det_probs_pol[:, 0])))
 
     print("Mean Qber: {:.2f}% with std of {:.4f}".format(
         np.mean(qbers) * 100,
         np.std(qbers) * 100))
     print("Max Qber: {:.2f}% at {}".format(
         np.max(qbers) * 100, bins[np.argmax(qbers)]))
-    print("Sifted key Rate: {:.2f}".format(num_sifted_det / meas_time / 1E-12))
+    print("Sifted key Rate: {:.2f}".format(num_sifted_det / meas_time))
     temp_key = target_key + target_key
     index_offset = 0
     sames = []
@@ -247,7 +256,7 @@ if __name__ == "__main__":
     plt.legend()
     plt.title(
         "Pulses with mean QBER={:.2f}%\nSifted key rate={:.2f}Kb/s".format(
-            np.mean(qbers) * 100, num_sifted_det / meas_time / 1E-12 / 1000))
+            np.mean(qbers) * 100, num_sifted_det / meas_time / 1000))
     plt.xlabel("Detection time in ps")
     plt.ylabel("Number of detections")
     plt.tight_layout()
@@ -255,10 +264,9 @@ if __name__ == "__main__":
     if (max(sames) == len(target_key)):
         sync_phases = data[1][data[0] == 5] % dt
         if len(sync_phases) > 0:
-            print(
-                "Detected key matches sent key with offset: {} and phase: {:.2f} std {:.4f}"
-                .format(np.argmax(sames), np.mean(sync_phases),
-                        np.std(sync_phases)))
+            print("Keys match with offset: {} and phase: {:.2f} std {:.4f}".
+                  format(np.argmax(sames), np.mean(sync_phases),
+                         np.std(sync_phases)))
         else:
             print("Detected key matches sent key with offset: {}".format(
                 np.argmax(sames)))
@@ -276,4 +284,5 @@ if __name__ == "__main__":
             sumcounts[key[i]].append(np.sum(bins[i]))
         for i in range(4):
             print(i, np.mean(sumcounts[i]))
+        plt.savefig(filename + ".png")
         plt.show()
