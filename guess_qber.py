@@ -57,24 +57,27 @@ if __name__ == "__main__":
     if not os.path.exists(file):
         print("Cannot open {}".format(file))
         sys.exit()
-    filename, file_extension = os.path.splitext(file)
+    filename, file_extension = os.path.splitext(os.path.basename(file))
 
     if file_extension == ".txt":
+        filename = folder + filename
         folder = "./data/measure_qber_" + time.strftime("%Y%m%d-%H%M%S") + "/"
-        key_filename = folder + "target_key.txt"
+        key_filename = filename + file_extension
         os.makedirs(folder)
         shutil.copyfile(file, key_filename)
         # Turn on Alice:
-        source = devices.Alice_LMU()
-        source.turn_on()
+        source = devices.Alice_LMU(host="t14s")
+        source.turn_on(set=1)
         source.send_key(key_filename)
 
         # Measure clicks using Timetagger:
         timestamp = devices.TimeTaggerUltra(channels)
-        ts = timestamp.read(30)
+        ts = timestamp.read(120)
         save_ts(ts, filename + ".bin")
+        source.stop_key()
     else:
         ts = load_ts(file)
+        filename, file_extension = os.path.splitext(file)
         key_filename = filename + ".txt"
 
     # Evaluate
@@ -89,22 +92,22 @@ if __name__ == "__main__":
     dt = 10000
     key_length = len(target_key)
     offset = 0
-    chan_offset = [1000, 1000, -5500, 2100, 0]
-    raw_data = ts.view(np.int64)  #[:,int(len(ts/2)):]
+    chan_offset = [1000, 1000, -5450, 2000, 0]
+    raw_data = ts.view(np.int64)  # [:,int(len(ts/2)):]
     raw_data[1] = raw_data[1]
     sync_data = raw_data[1][raw_data[0] == channels["SYNC"]["ch"]]
-    meas_time = raw_data[1][-1] - raw_data[1][0]
-
-    print(f"Got {len(raw_data[0])} Events in {meas_time*1E-12}s")
+    meas_time = (raw_data[1][-1] - raw_data[1][0]) * 1E-12
 
     if sync_data.size != 0:
         print("Sync Chan detected")
         raw_data[1] -= sync_data[1]
         raw_data = raw_data[:, raw_data[1] >= 0]
         meas_time = raw_data[1][-1] - raw_data[1][0]
-        print(
-            f"Got {len(raw_data[0])} Events in {meas_time*1E-12}s after first SYNC"
-        )
+        print("Got {:.2e} Events in {:.0f}s after first SYNC".format(
+            len(raw_data[0]), meas_time * 1E-12))
+    else:
+        print("Got {:.2e} Events in {:.0f}s".format(len(raw_data[0]),
+                                                    meas_time))
 
     offsets = []
     for i in range(0, 4):
@@ -113,7 +116,8 @@ if __name__ == "__main__":
         while filter_var > 2000:
             offset += 2000
             if offset >= 10000:
-                print(f"max{i}")
+                print("max offset for channel {}".format(inv_symbol_map[i +
+                                                                        1]))
                 break
             channel_data = raw_data[1][raw_data[0] == i +
                                        1] + offset + chan_offset[i]
@@ -121,7 +125,7 @@ if __name__ == "__main__":
             filter_var = np.std(time_in_symbol)
         offsets.append(offset)
     offset = max(offsets)
-    print(f"Setting offset to: {offset}")
+    print("Setting offset to: {}ps".format(offset))
 
     filter_means = []
     filter_vars = []
@@ -134,8 +138,8 @@ if __name__ == "__main__":
     filter_mean = np.mean(filter_means)
     filter_var = np.mean(filter_vars)
 
-    filter_min = filter_mean - 0.55 * filter_var
-    filter_max = filter_mean + 0.65 * filter_var
+    filter_min = filter_mean - 0.45 * filter_var
+    filter_max = filter_mean + 0.55 * filter_var
     print("Setting filter from {:.0f}ps to {:.0f}ps".format(
         filter_min, filter_max))
 
@@ -150,7 +154,7 @@ if __name__ == "__main__":
         n, _, _ = plt.hist(phases[data[0] == i + 1],
                            bins=100,
                            alpha=0.4,
-                           label=f"{inv_symbol_map[i+1]}")
+                           label=inv_symbol_map[i + 1])
         nmax.append(np.max(n))
     plt.vlines(filter_min, 0, max(nmax))
     plt.vlines(filter_max, 0, max(nmax))
@@ -159,6 +163,10 @@ if __name__ == "__main__":
         np.logical_and(phases >= filter_min, phases <= filter_max),
         data[0] == 5)
     data = data[:, time_mask]
+
+    for i in range(0, 5):
+        print("Got {} {} Events".format(len(data[1, data[0] == i + 1]),
+                                        inv_symbol_map[i + 1]))
 
     bins = np.zeros((key_length, 4))
     for i in range(0, 4):
@@ -207,13 +215,17 @@ if __name__ == "__main__":
 
     det_probs = np.array(det_probs)
     det_key = np.array(key)
-
+    det_probs_pol = []
     for i in range(4):
         probs = det_probs[det_key == i]
-        print("Detection Prob for {}: {:.6f}% with a std of {:.8f}".format(
-            inv_symbol_map[i + 1],
-            np.mean(probs) * 100,
-            np.std(probs) * 100))
+        det_probs_pol.append([probs.mean(), probs.std()])
+    det_probs_pol = np.array(det_probs_pol)
+    for i in range(4):
+        print(
+            "Detection Prob for {}: {:.6f}% with a std of {:.8f} relative {:.2f}"
+            .format(inv_symbol_map[i + 1], det_probs_pol[i][0] * 100,
+                    det_probs_pol[i][1] * 100,
+                    det_probs_pol[i][0] / np.max(det_probs_pol[:, 0])))
 
     print("Mean Qber: {:.2f}% with std of {:.4f}".format(
         np.mean(qbers) * 100,
@@ -244,7 +256,7 @@ if __name__ == "__main__":
         sync_phases = data[1][data[0] == 5] % dt
         if len(sync_phases) > 0:
             print(
-                "Detected key matches sent key with offset: {} and phase: {} std {}"
+                "Detected key matches sent key with offset: {} and phase: {:.2f} std {:.4f}"
                 .format(np.argmax(sames), np.mean(sync_phases),
                         np.std(sync_phases)))
         else:

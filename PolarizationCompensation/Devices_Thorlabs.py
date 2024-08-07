@@ -69,7 +69,7 @@ class Waveplates(dev.WAVEPLATES):
         self.move_to(self.hwp_angle0)
         print("Setting jog params")
         for i, wp in enumerate(self.waveplates):
-            wp.setup_jog(step_size=360, max_velocity=self.hwp_speed[i] * speed)
+            wp.setup_jog(speed=self.hwp_speed[i] * speed)
         print("Start jog")
         for wp in self.waveplates:
             wp.jog()
@@ -118,13 +118,21 @@ class Alice_LMU(dev.SOURCE):
             #                       [2, 163, 255, 100, 175]]
 
             self.aliceSettings = {
-                "H": [3, 211, 255, 100, 175],
-                "V": [2, 236, 255, 100, 175],
-                "P": [4, 255, 255, 100, 175],
-                "M": [2, 197, 255, 100, 172]
+                1 : {
+                    "H": [3, 228, 255, 100, 175],
+                    "V": [2, 233, 255, 100, 175],
+                    "P": [4, 255, 255, 100, 175],
+                    "M": [2, 205, 255, 100, 173]
+                },
+                2 : {
+                    "H": [3, 228, 255, 100, 175],
+                    "V": [2, 233, 255, 100, 175],
+                    "P": [4, 255, 255, 100, 175],
+                    "M": [2, 200, 255, 100, 172]
+                }
             }
 
-    def turn_on(self, pol=None):
+    def turn_on(self, pol=None, set=1):
         if not pol:
             pol = ["H", "V", "P", "M"]
         else:
@@ -133,15 +141,15 @@ class Alice_LMU(dev.SOURCE):
             print("Turn on pol: {}".format(p))
             self._send_command(
                 self.commandLine.format(self.channel_map[p],
-                                        *self.aliceSettings[p]))
+                                        *self.aliceSettings[set][p]))
 
     def turn_off(self):
         print("Turning off Laser")
         self._send_command(self.commandLine.format("-1", *[0, 0, 0, 0, 0]))
 
-    def _send_command(self, command):
+    def _send_command(self, command, forcelocal=False):
         print("sending command:\n{}".format(command))
-        if not self.host == "local":
+        if not (self.host == "local" or forcelocal):
             return self._send_command_ssh(command)
 
         proc = subprocess.Popen(command.split(" "),
@@ -186,24 +194,35 @@ class Alice_LMU(dev.SOURCE):
                     first = not first
 
         data = np.array(data)
+        dir,filename=os.path.split(filename)
         filename, file_extension = os.path.splitext(filename)
-        filename = filename + ".key"
-        data.tofile(filename)
+
+        keyfilename = dir +"/"+ filename + ".key"
+        data.tofile(keyfilename)
+        if not self.host == "local":
+            time.sleep(1)
+            self._send_command("scp {} {}:~/{}".format(os.path.abspath(keyfilename),self.host,filename+".key"), forcelocal=True)
+            return "~/"+ filename + ".key"
         return filename
 
     def send_key(self, key):
         filename, file_extension = os.path.splitext(key)
         if file_extension == ".key":
-            self._send_command("ram-playback -f {}".format(key))
+            self._send_command("ram-playback -if {}".format(key))
         else:
-            self._send_command("ram-playback -f {}".format(
+            self._send_command("ram-playback -if {}".format(
                 self.txt_to_key(key)))
+            
+    def stop_key(self):
+        self._send_command("ram-playback -s")
+
 
 
 class TimeTaggerUltra(dev.TIMESTAMP):
 
     def __init__(self, channels):
         import TimeTagger
+        print("Initializing timetagger")
 
         self.channel_dict = channels
         self.channels_measure = [

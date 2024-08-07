@@ -188,22 +188,26 @@ def fit_Q_Channel(measurement, waveplate_setup):
             count += 1
         return error
 
-    bounds = [(0, np.pi), (0, np.pi), (0, np.pi)]
+    bounds = [(0, np.pi), (0, np.pi/2), (0, np.pi)]
 
     measurement = np.array(measurement)
-    alpha_s = np.linspace(0, np.pi, 5)
-    beta_s = np.linspace(0, np.pi, 5)
-    gamma_s = np.linspace(0, np.pi, 5)
+    alpha_s = np.linspace(0, np.pi, 10)
+    beta_s = np.linspace(0, np.pi/2, 10)
+    gamma_s = np.linspace(0, np.pi, 10)
     Roots = []
     funs = []
+    a=[]
     for x0 in itertools.product(alpha_s, beta_s, gamma_s):
         x0 = np.array(x0)
-        Root = so.minimize(objective, x0=x0, bounds=bounds)
+        Root = so.minimize(objective, x0=x0, bounds=bounds, method="L-BFGS-B",options = {"ftol":1E-18,"gtol":1E-18,"maxls":40})
+        a.append(Root)
         Roots.append(Root.x)
         funs.append(Root.fun)
 
     Roots = np.array(Roots)
     min_fun_ind = np.where(funs == min(funs))[0][0]
+    print(a[min_fun_ind].success)
+    print(a[min_fun_ind].nit)
 
     x = Roots[min_fun_ind]
     fun = funs[min_fun_ind]

@@ -38,8 +38,13 @@ channels = {
     }
 }
 
-send_pol = ["V", "M"]
+send_pol = ["V", "P"]
 waveplate_setup = ["QWP", "HWP", "QWP"]
+aliceSettings = {
+                "H": [0, 0, 0, 100, 175],
+                "V": [14, 0, 0, 100, 175],
+                "P": [0, 0, 0, 100, 175],
+                "M": [15, 0, 0, 100, 172]}
 
 if __name__ == "__main__":
     symbol_map = {k: v["ch"] - 1 for k, v in channels.items() if k != "CLK"}
@@ -63,7 +68,7 @@ if __name__ == "__main__":
                                         hwp_angle0=[0, 0, 90],
                                         hwp_speed=[1, 1, 1],
                                         qwp_angle0=[135, 112.5, 135])
-        source = devices.Alice_LMU()
+        source = devices.Alice_LMU("t14s")
         timestamp = devices.TimeTaggerUltra(channels)
 
         # Do this every time it is moved
@@ -72,8 +77,11 @@ if __name__ == "__main__":
         _, counts = mm.measure_Coupling_Efficiency_cont(
             source, waveplates, timestamp)
         np.save(path + "counts_coupling.npy", counts)
+        #coupling = [0.50516748, 0.49483252, 0.49319967, 0.50680033]
     else:
         counts = np.load(path + "counts_coupling.npy")
+        #coupling = [0.50516748, 0.49483252, 0.49319967, 0.50680033]
+
     coupling = mm.evaluate_Coupling_Efficiency(counts, inv_symbol_map, path)
     print("Coupling:\n", coupling)
 

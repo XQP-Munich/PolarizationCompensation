@@ -5,12 +5,12 @@ import matplotlib.pyplot as plt
 
 def measure_Coupling_Efficiency_cont(source, waveplates, timestamp):
     # Measure
-    angle_max = 180
+    angle_max = 90
     deg_per_sec = 10
 
     source.turn_off()
     waveplates.home()
-    source.turn_on(1)
+    source.turn_on("V")
 
     waveplates.jog_like_HWP(deg_per_sec)
     timestamp.read(int(angle_max / deg_per_sec))
@@ -99,13 +99,13 @@ def get_Coupling_Efficiency_cont(source, waveplates, timestamp):
     return evaluate_Coupling_Efficiency(counts)
 
 
-def measure_Polcomp_Counts(source, waveplates, timestamp, send_pol=["H", "V"]):
+def measure_Polcomp_Counts(source, waveplates, timestamp, send_pol=["V", "M"]):
     measurements = []
     bins = []
     measurementTime = 5
     waveplates.move_to(0)
 
-    # Measure H using unitary
+    # Measure pol0 using unitary
     source.turn_on(send_pol[0])
     timestamp.read(measurementTime)
     times, counts = timestamp.get_counts_per_second()
@@ -113,7 +113,7 @@ def measure_Polcomp_Counts(source, waveplates, timestamp, send_pol=["H", "V"]):
     bins.append(times)
     source.turn_off()
 
-    # Measure P using unitary
+    # Measure pol1 using unitary
     source.turn_on(send_pol[1])
     timestamp.read(measurementTime)
     times, counts = timestamp.get_counts_per_second()
@@ -152,6 +152,7 @@ def evaluate_Polcomp_Counts(counts,
                             coupling,
                             sent_pol=["V", "M"],
                             waveplate_setup=["QWP", "HWP", "QWP"]):
+    print(counts)
     meas_1 = np.concatenate((counts[0], counts[3, [2, 3]]))
     meas_2 = np.concatenate((counts[1], counts[2, [2, 3]]))
     measurement_raw = np.vstack((meas_1, meas_2))
