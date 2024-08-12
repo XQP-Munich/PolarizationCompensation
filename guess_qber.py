@@ -2,6 +2,7 @@
 
 import time, sys, os, shutil
 import numpy as np
+import scipy as sp
 import matplotlib.pyplot as plt
 import PolarizationCompensation.Devices_Thorlabs as devices
 
@@ -78,7 +79,7 @@ if __name__ == "__main__":
         source.stop_key()
     elif file_extension == ".ttbin":
         # Measure clicks using Virtual Timetagger:
-        timestamp = devices.TimeTaggerUltraVirtual(channels,file)
+        timestamp = devices.TimeTaggerUltraVirtual(channels, file)
         ts = timestamp.read(10)
         save_ts(ts, filename + ".bin")
         filename, file_extension = os.path.splitext(file)
@@ -100,10 +101,10 @@ if __name__ == "__main__":
     dt = 10000
     key_length = len(target_key)
     print(key_length)
-    bob_eff = 25.3852/100
-    filter = 1.32/100
-    rep_rate=1/(dt*1E-12)
-    alice_trans=0.917
+    bob_eff = 25.3852 / 100
+    filter = 1.32 / 100
+    rep_rate = 1 / (dt * 1E-12)
+    alice_trans = 0.917
     offset = 0
     chan_offset = [1000, 1071, -5515, 2070, 0]
     raw_data = ts.view(np.int64)  # [:,int(len(ts/2)):]
@@ -118,7 +119,7 @@ if __name__ == "__main__":
         meas_time = (raw_data[1][-1] - raw_data[1][0]) * 1E-12
         print("Got {:.2e} Events in {:.0f}s after first SYNC".format(
             len(raw_data[0]), meas_time))
-        
+
         offset = 52000
         print("Setting offset to: {}ps".format(offset))
     else:
@@ -131,11 +132,11 @@ if __name__ == "__main__":
             while filter_var > 2000:
                 offset += 2000
                 if offset >= 10000:
-                    print("max offset for channel {}".format(inv_symbol_map[i +
-                                                                            1]))
+                    print("max offset for channel {}".format(
+                        inv_symbol_map[i + 1]))
                     break
                 channel_data = raw_data[1][raw_data[0] == i +
-                                        1] + offset + chan_offset[i]
+                                           1] + offset + chan_offset[i]
                 time_in_symbol = (channel_data % dt)
                 filter_var = np.std(time_in_symbol)
             offsets.append(offset)
@@ -143,26 +144,22 @@ if __name__ == "__main__":
         offset = 265000
         print("Setting offset to: {}ps".format(offset))
 
-    filter_means = []
-    filter_vars = []
-    for i in range(0, 4):
-        channel_data = raw_data[1][raw_data[0] == i +
-                                   1] + offset + chan_offset[i]
-        time_in_symbol = (channel_data % dt)
-        filter_means.append(np.median(time_in_symbol))
-        filter_vars.append(np.std(time_in_symbol))
-    print(filter_means)
-    filter_mean = np.mean(filter_means)
-    filter_var = np.mean(filter_vars)
-
-    filter_min = filter_mean - 0.15 * filter_var
-    filter_max = filter_mean + 0.3 * filter_var
-    print("Setting filter from {:.0f}ps to {:.0f}ps".format(
-        filter_min, filter_max))
-
     data = raw_data.copy()
     for i in range(0, 5):
         data[1, data[0] == i + 1] += offset + chan_offset[i]
+
+    bin_width = 100
+    bins = np.histogram(data[1, data[0] != channels["SYNC"]["ch"]] % dt,
+                        bins=bin_width)[0]
+    peaks, _ = sp.signal.find_peaks(bins, height=max(bins) / 2)
+    _, _, filter_min, filter_max = sp.signal.peak_widths(bins,
+                                                         peaks,
+                                                         rel_height=0.7)
+    filter_min = filter_min[0] * bin_width
+    filter_max = filter_max[0] * bin_width
+
+    print("Setting filter from {:.0f}ps to {:.0f}ps".format(
+        filter_min, filter_max))
 
     phases = data[1] % dt
     plt.figure(figsize=(5, 3), dpi=400)
@@ -174,15 +171,14 @@ if __name__ == "__main__":
                            label=inv_symbol_map[i + 1])
         nmax.append(np.max(n))
     phase = phases[data[0] == channels["SYNC"]["ch"]]
-    n,_=np.histogram(phase,bins=100,range=(0,dt))
-    weight=max(nmax)/max(n)
+    n, _ = np.histogram(phase, bins=100, range=(0, dt))
+    weight = max(nmax) / max(n)
     plt.hist(phase,
-                bins=100,
-                range=(0,dt),
-                alpha=0.4,
-                label="SYNC*",
-                weights=np.ones(len(phase)) * weight)
-    
+             bins=100,
+             range=(0, dt),
+             alpha=0.4,
+             label="SYNC*",
+             weights=np.ones(len(phase)) * weight)
 
     plt.vlines(filter_min, 0, max(nmax))
     plt.vlines(filter_max, 0, max(nmax))
@@ -273,8 +269,6 @@ if __name__ == "__main__":
         key.append(val)
         qbers.append(qber)
         det_probs.append(det_prob)
-    qbers = np.array(qbers)
-    qbers = qbers[~np.isnan(qbers)]
 
     det_probs = np.array(det_probs)
     det_key = np.array(key)
@@ -291,8 +285,8 @@ if __name__ == "__main__":
                    det_probs_pol[i][0] / np.max(det_probs_pol[:, 0])))
 
     print("Mean Qber: {:.2f}% with std of {:.4f}".format(
-        np.mean(qbers) * 100,
-        np.std(qbers) * 100))
+        np.nanmean(qbers) * 100,
+        np.nanstd(qbers) * 100))
     print("Max Qber: {:.2f}% at {}".format(
         np.max(qbers) * 100, bins[np.argmax(qbers)]))
     print("Sifted key Rate: {:.2f}".format(num_sifted_det / meas_time))
@@ -310,14 +304,14 @@ if __name__ == "__main__":
     plt.legend()
     plt.title(
         "Pulses with mean QBER={:.2f}%\nSifted key rate={:.2f}Kb/s".format(
-            np.mean(qbers) * 100, num_sifted_det / meas_time / 1000))
+            np.nanmean(qbers) * 100, num_sifted_det / meas_time / 1000))
     plt.xlabel("Detection time in ps")
     plt.ylabel("Number of detections")
     plt.tight_layout()
 
     if (max(sames) == len(target_key)):
         sync_phases = data[1][data[0] == 5] % dt
-        ind_offset=np.argmax(sames)
+        ind_offset = np.argmax(sames)
         if len(sync_phases) > 0:
             print("Keys match with offset: {} and phase: {:.2f} std {:.4f}".
                   format(ind_offset, np.mean(sync_phases),
@@ -327,12 +321,13 @@ if __name__ == "__main__":
                 np.argmax(sames)))
         plt.savefig(filename + ".png")
 
-        key = np.array(temp_key[ind_offset:ind_offset+len(target_key)])
+        key = np.array(temp_key[ind_offset:ind_offset + len(target_key)])
         for i in range(4):
-            pol_bin = bins[key==i,:]
-            mu = pol_bin.sum()/meas_time/bob_eff/filter/rep_rate/(len(pol_bin)/key_length)*alice_trans
-            print("Mean Photon Numbers for {}: {:.3f}".format(inv_symbol_map[i+1],mu))
-
+            pol_bin = bins[key == i, :]
+            mu = pol_bin.sum() / meas_time / bob_eff / filter / rep_rate / (
+                len(pol_bin) / key_length) * alice_trans
+            print("Mean Photon Numbers for {}: {:.3f}".format(
+                inv_symbol_map[i + 1], mu))
 
     else:
         print(len(sames), max(sames), np.argmax(sames))
