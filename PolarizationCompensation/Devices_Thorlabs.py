@@ -119,20 +119,32 @@ class Alice_LMU(dev.SOURCE):
 
             self.aliceSettings = {
                 1 : {
-                    "H": [3, 228, 255, 100, 175],
-                    "V": [2, 233, 255, 100, 175],
-                    "P": [4, 255, 255, 100, 175],
-                    "M": [2, 205, 255, 100, 173]
+                    "H": [3, 255, 186, 100, 100+76],
+                    "V": [3, 204, 197, 96, 96+70],
+                    "P": [4, 237, 172, 117, 117 +66],
+                    "M": [3, 180, 176, 82, 82+63]
                 },
                 2 : {
-                    "H": [3, 228, 255, 100, 175],
-                    "V": [2, 233, 255, 100, 175],
-                    "P": [4, 255, 255, 100, 175],
-                    "M": [2, 200, 255, 100, 172]
-                }
+                    "H": [3, 236, 211, 100, 100+54],
+                    "V": [3, 240, 235, 96, 96+54],
+                    "P": [4, 193, 173, 117, 117 +55],
+                    "M": [3, 196, 192, 82, 82+53]
+                },
+                3 : {
+                    "H": [3, 236, 211, 100, 100+54],
+                    "V": [3, 240, 235, 96, 96+54],
+                    "P": [4, 193, 173, 117, 117 +55],
+                    "M": [3, 200, 195, 82, 82+53]
+                },
+                4 : {
+                    "H": [3, 255, 186, 100, 100+76],
+                    "V": [3, 204, 197, 96, 96+70],
+                    "P": [4, 237, 172, 117, 117 +66],
+                    "M": [3, 200, 176, 82, 82+63]
+                },
             }
 
-    def turn_on(self, pol=None, set=1):
+    def turn_on(self, pol=None, set=3):
         if not pol:
             pol = ["H", "V", "P", "M"]
         else:
@@ -237,7 +249,7 @@ class TimeTaggerUltra(dev.TIMESTAMP):
                 self.tt.setEventDivider(channels[key]["ch"], 1)
                 self.tt.setSoftwareClock(channels[key]["ch"], 10_000_000)
 
-        time.sleep(5)
+        time.sleep(1)
 
     def read(self, t):
         import TimeTagger
@@ -275,3 +287,33 @@ class TimeTaggerUltra(dev.TIMESTAMP):
             cps.append(counts)
         cps = np.transpose(np.array(cps))
         return bins, cps
+    
+class TimeTaggerUltraVirtual(TimeTaggerUltra): # Added 09.08.2024 by Peter
+    
+    def __init__(self,channels, filename="BB84_virtual"):
+        import TimeTagger
+        print('Virtual TimeTagger Initialized')
+
+        self.channel_dict = channels
+        self.channels_measure = [
+            channels[c]["ch"] for c in channels if c != "CLK"
+        ]
+        # Creating Virtual TimeTagger Object
+        self.tt = TimeTagger.createTimeTaggerVirtual()
+        replay_sepped = -1 # < 1 is as fast as possible
+        replay_begin = 0
+        replay_duration = -1
+        self.tt.setReplaySpeed(speed=replay_sepped)
+        self.tt.replay(file=filename, begin=replay_begin, duration=replay_duration)
+
+    
+    def read(self,t=30):
+        import TimeTagger
+
+        self.stream = TimeTagger.TimeTagStream(self.tt, 1E9,
+                                                self.channels_measure)
+        # self.stream.waitUntilFinished()
+        self.tt.waitForCompletion()
+        data = self.stream.getData()
+        self.ts = np.array([data.getChannels(), data.getTimestamps()])
+        return self.ts 
