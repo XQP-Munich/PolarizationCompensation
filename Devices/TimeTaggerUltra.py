@@ -1,7 +1,7 @@
 import time
 import numpy as np
 
-from PolarizationCompensation.Devices.Templates import TIMESTAMP
+from Devices.Templates import TIMESTAMP
 
 
 class TimeTaggerUltra(TIMESTAMP):

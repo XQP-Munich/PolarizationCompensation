@@ -2,7 +2,7 @@ import subprocess
 import os
 import numpy as np
 
-from PolarizationCompensation.Devices.Templates import SOURCE
+from Devices.Templates import SOURCE
 
 
 class AliceLmu(SOURCE):

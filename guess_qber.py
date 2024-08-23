@@ -122,12 +122,22 @@ def plot_phase(phases,
         gc.collect()
         ax = fig.add_subplot()
     nmax = []
+    start = time.time()
+    hists = []
     for i in range(0, 4):
-        n, _, _ = ax.hist(phases[1, phases[0] == i + 1],
-                          bins=100,
-                          alpha=0.4,
-                          label=label[i])
-        nmax.append(np.max(n))
+        hist, bins = np.histogram(phases[1, phases[0] == i + 1],
+                                  bins=100,
+                                  range=[0, dt])
+        hists.append(hist)
+        nmax.append(np.max(hist))
+    print(bins)
+    print("Histgen took {:.2f}".format(time.time() - start))
+    start = time.time()
+
+    for i in range(0, 4):
+        ax.bar(bins[:-1], hists[i], width=100, alpha=0.4, label=label[i])
+    print("Histplot took {:.2f}".format(time.time() - start))
+    start = time.time()
     phase = phases[1, phases[0] == channels["SYNC"]["ch"]]
     n, _ = np.histogram(phase, bins=100, range=(0, dt))
     weight = max(nmax) / max(n)
@@ -137,7 +147,8 @@ def plot_phase(phases,
                       alpha=0.4,
                       label="SYNC*",
                       weights=np.ones(len(phase)) * weight)
-
+    print("sync Hist took {:.2f}".format(time.time() - start))
+    start = time.time()
     ax.vlines(filters[0], 0, max(nmax))
     ax.vlines(filters[1], 0, max(nmax))
     ax.annotate("Δ  = {:.0f}ps".format((filters[1] - filters[0])),
@@ -166,6 +177,8 @@ def plot_phase(phases,
             frame, t0, t0 + meas_time), (0, 5),
                     xycoords="figure pixels",
                     fontsize="5")
+    print("rest took {:.2f}".format(time.time() - start))
+    start = time.time()
 
     return fig, ax
 
@@ -455,7 +468,7 @@ def main():
 
     # simulate channel loss
     np.random.seed(42)
-    nr = 20
+    nr = 0
     e_id = 0
     for i in range(1, nr):
         b_id = int(np.random.random() * (len(rd[0]) / nr)) + e_id
@@ -473,11 +486,13 @@ def main():
     # simulate live data
     rd[1] -= rd[1][0]
     end = int(rd[1][-1] * 1E-12)
-    datas = [
-        rd[:, np.logical_and(rd[1] > (i) * 1E12, rd[1] < (i + 1) * 1E12)]
-        for i in range(end)
-    ]
-
+    #datas = [
+    #    rd[:, np.logical_and(rd[1] > (i) * 1E12, rd[1] < (i + 1) * 1E12)]
+    #    for i in range(2)
+    #]
+    #for i, data in enumerate(datas):
+    #    save_ts(data, "frame{}.bin".format(i))
+    datas = [rd]
     offsets = chan_offset
     fig, ax = plt.subplots(figsize=(5, 3), dpi=400)
     plt.show(block=False)
@@ -493,19 +508,29 @@ def main():
                 print("No Timestamps in frame")
                 continue
             data = get_valid_frames(data, verbose=False)
+            start2 = time.time()
+            print("Valid Frames took: {:.2f}".format(start2 - start))
             if len(data) <= 0:
                 print("No Sync detected in frame")
                 continue
             offsets, filters, plot_data, sifted_events = evaluate_tags(
                 data, channels, offsets, verbose=False)
+            start3 = time.time()
+            print("Evaluate took: {:.2f}".format(start3 - start2))
 
             plot_phase(*plot_data, frame=frame, fig=fig, ax=ax)
             fig.canvas.flush_events()
+            start4 = time.time()
+            print("Plot took: {:.2f}".format(start4 - start3))
             plt.pause(.1)
             rgba = np.asarray(fig.canvas.buffer_rgba())
             im = Image.fromarray(rgba)
             im.save(folder + "phases{}.png".format(frame))
+            start5 = time.time()
+            print("Image took: {:.2f}".format(start5 - start4))
             save_sifted(sifted_events, folder + "frame{}.csv".format(frame))
+            start6 = time.time()
+            print("Sifted took: {:.2f}".format(start6 - start5))
             duration = time.time() - start
             print("Frame {} done. {:.1f}fps".format(frame, 1 / duration))
             duration = time.time() - start

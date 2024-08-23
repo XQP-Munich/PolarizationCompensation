@@ -1,6 +1,6 @@
 import numpy as np
 
-from PolarizationCompensation.Devices.Templates import WAVEPLATE, WAVEPLATES
+from Devices.Templates import WAVEPLATE
 
 
 class K10CR1(WAVEPLATE):

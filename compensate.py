@@ -3,7 +3,10 @@
 import sys, os, time
 import numpy as np
 import PolarizationCompensation.Measurements as mm
-import PolarizationCompensation.Devices_Thorlabs as devices
+from Devices.K10CR1 import K10CR1
+from Devices.Waveplates import Waveplates
+from Devices.AliceLmu import AliceLmu
+from Devices.TimeTaggerUltra import TimeTaggerUltra
 
 channels = {
     "H": {
@@ -41,10 +44,11 @@ channels = {
 send_pol = ["V", "P"]
 waveplate_setup = ["QWP", "HWP", "QWP"]
 aliceSettings = {
-                "H": [0, 0, 0, 100, 175],
-                "V": [14, 0, 0, 100, 175],
-                "P": [0, 0, 0, 100, 175],
-                "M": [15, 0, 0, 100, 172]}
+    "H": [0, 0, 0, 100, 175],
+    "V": [14, 0, 0, 100, 175],
+    "P": [0, 0, 0, 100, 175],
+    "M": [15, 0, 0, 100, 172]
+}
 
 if __name__ == "__main__":
     symbol_map = {k: v["ch"] - 1 for k, v in channels.items() if k != "CLK"}
@@ -59,17 +63,17 @@ if __name__ == "__main__":
         os.makedirs(path)
 
         # initialize devices
-        qwp2 = devices.K10CR1(55232924, 308.24)
-        hwp = devices.K10CR1(55232454, 231.59)
-        qwp1 = devices.K10CR1(55232464, 301.01)
+        qwp2 = K10CR1(55232924, 308.24)
+        hwp = K10CR1(55232454, 231.59)
+        qwp1 = K10CR1(55232464, 301.01)
 
         # get values of hwp_angle0,hwp_speed,qwp_angle from simulation script
-        waveplates = devices.Waveplates([qwp1, hwp, qwp2],
-                                        hwp_angle0=[0, 0, 90],
-                                        hwp_speed=[1, 1, 1],
-                                        qwp_angle0=[135, 112.5, 135])
-        source = devices.Alice_LMU("t14s")
-        timestamp = devices.TimeTaggerUltra(channels)
+        waveplates = Waveplates([qwp1, hwp, qwp2],
+                                hwp_angle0=[0, 0, 90],
+                                hwp_speed=[1, 1, 1],
+                                qwp_angle0=[135, 112.5, 135])
+        source = AliceLmu("t14s")
+        timestamp = TimeTaggerUltra(channels)
 
         # Do this every time it is moved
         # Send any Linear Pos into bob
