@@ -115,121 +115,39 @@ def load_ts(path):
     return np.array([np.bitwise_and(data, 15), np.right_shift(data, 4)])
 
 
-def plot_phase(phases,
-               filters,
-               qber,
-               keyrate,
-               meas_time,
-               t0,
-               label,
-               frame=None,
-               fig=None,
-               ax=None):
-    if fig is None:
-        fig, ax = plt.subplots(figsize=(5, 3), dpi=400)
-    else:
-        fig.clear()
-        gc.collect()
-        ax = fig.add_subplot()
-    nmax = []
-    start = time.time()
-    hists = []
-    for i in range(0, 4):
-        hist, bins = np.histogram(phases[1, phases[0] == i + 1],
-                                  bins=100,
-                                  range=[0, dt])
-        hists.append(hist)
-        nmax.append(np.max(hist))
-    print(bins)
-    print("Histgen took {:.2f}".format(time.time() - start))
-    start = time.time()
-
-    for i in range(0, 4):
-        ax.bar(bins[:-1], hists[i], width=100, alpha=0.4, label=label[i])
-    print("Histplot took {:.2f}".format(time.time() - start))
-    start = time.time()
-    phase = phases[1, phases[0] == channels["SYNC"]["ch"]]
-    n, _ = np.histogram(phase, bins=100, range=(0, dt))
-    weight = max(nmax) / max(n)
-    _, _, _ = ax.hist(phase,
-                      bins=100,
-                      range=(0, dt),
-                      alpha=0.4,
-                      label="SYNC*",
-                      weights=np.ones(len(phase)) * weight)
-    print("sync Hist took {:.2f}".format(time.time() - start))
-    start = time.time()
-    ax.vlines(filters[0], 0, max(nmax))
-    ax.vlines(filters[1], 0, max(nmax))
-    ax.annotate("Δ  = {:.0f}ps".format((filters[1] - filters[0])),
-                (filters[0] - 100, max(nmax) * 0.9),
-                fontsize="5",
-                ha="right",
-                va="top")
-    ax.annotate("FWHM = {:.0f}ps".format((filters[3] - filters[2])),
-                (filters[3] + 100, 20),
-                fontsize="5")
-    ax.legend()
-
-    ax.set_title(
-        "Pulses with mean QBER={:.2f}%\nSifted key rate={:.2f}Kb/s".format(
-            qber * 100, keyrate / meas_time / 1000))
-    ax.set_xlabel("Detection time in ps")
-    ax.set_ylabel("Number of detections")
-    fig.tight_layout()
-    if frame is None:
-        ax.annotate("t_0: {:.1f}s, t_max: {:.1f}s".format(t0, t0 + meas_time),
-                    (0, 5),
-                    xycoords="figure pixels",
-                    fontsize="5")
-    else:
-        ax.annotate("Frame: {}, t_0: {:.1f}s, t_max: {:.1f}s".format(
-            frame, t0, t0 + meas_time), (0, 5),
-                    xycoords="figure pixels",
-                    fontsize="5")
-    print("rest took {:.2f}".format(time.time() - start))
-    start = time.time()
-
-    return fig, ax
-
-
-def guess_key(bins, key_length):
+def guess_key(bins):
     key = []
     qbers = []
-    detections = []
-    num_sifted_det = 0
-    for i in range(key_length):
-        count = bins[i]
+    num_sifted_det = []
+    for count in bins:
         diff1 = count[0] - count[1]
         diff2 = count[2] - count[3]
         diff3 = abs(diff1) - abs(diff2)
-        val = 0
-        qber = 0
+        val = 4
+        qber = 0.5
         if diff3 > 0:
-            if diff1 > 0:
-                val = 0
-                qber = count[1] / (count[0] + count[1])
-                detection = count[0]
-            else:
-                val = 1
-                qber = count[0] / (count[0] + count[1])
-                detection = count[1]
-            num_sifted_det += count[0] + count[1]
+            basis_counts = count[0] + count[1]
+            if basis_counts > 0:
+                if diff1 > 0:
+                    val = 0
+                    qber = count[1] / basis_counts
+                else:
+                    val = 1
+                    qber = count[0] / basis_counts
         else:
-            if diff2 > 0:
-                val = 2
-                qber = count[3] / (count[2] + count[3])
-                detection = count[2]
-            else:
-                val = 3
-                qber = count[2] / (count[2] + count[3])
-                detection = count[3]
-            num_sifted_det += count[2] + count[3]
+            basis_counts = count[2] + count[3]
+            if basis_counts > 0:
+                if diff2 > 0:
+                    val = 2
+                    qber = count[3] / basis_counts
+                else:
+                    val = 3
+                    qber = count[2] / basis_counts
+        num_sifted_det.append(basis_counts)
         key.append(val)
         qbers.append(qber)
-        detections.append(detection)
 
-    return np.array(key), np.array(qbers), np.array(detections), num_sifted_det
+    return np.array(key), np.array(qbers), np.array(num_sifted_det)
 
 
 def find_filter(phases, height=0.8):
@@ -262,27 +180,39 @@ def find_filter(phases, height=0.8):
 
 def get_mu(bins, key):
     mus = []
-    for i in range(4):
-        pol_bin = bins[key == i, :]
-        mu = pol_bin.sum() / meas_time / bob_eff / filter / rep_rate / (
-            len(pol_bin) / key_length) * alice_trans
+    for pol in range(8):
+        pol_bin = bins[key == pol, :]
+        mu = pol_bin.sum() / meas_time / bob_eff / rep_rate / (
+            len(pol_bin) / len(bins)) * alice_trans
         mus.append(mu)
-        print("Mean Photon Numbers for {}: {:.3f}".format(
-            inv_symbol_map[i + 1], mu))
     return mus
 
 
-def evaluate_tags(data, channels, offsets, filters=None, verbose=True):
+def evaluate_tags(
+    data,
+    channels,
+    offsets,
+    sent_key=None,
+    key_length=None,
+    sync_offset=None,
+    filters=None,
+    verbose=True,
+):
     sync_data = data[1][data[0] == channels["SYNC"]["ch"]]
-    sync_phase = int(np.rint(stats.circmean(sync_data % dt, high=dt)))
-
-    key_length = int(np.rint(np.mean(np.diff(sync_data)) / dt))
-    if verbose:
-        print("Key length: {}".format(key_length))
-
+    sync_phase = 0
+    if sent_key is not None:
+        key_length = len(sent_key)
     if sync_data.size != 0:
+        key_length_sync = int(np.rint(np.mean(np.diff(sync_data)) / dt))
+        if key_length is not None and key_length_sync != key_length:
+            print(key_length, key_length_sync)
+            return []
+            #raise Exception(
+            #    "Detected Key length does not match expected key length")
+        key_length = key_length_sync
         if verbose:
             print("Sync Chan detected")
+            print("Key length: {}".format(key_length))
         t0 = sync_data[1]
         data[1] -= t0 - 1000
         data = data[:,
@@ -293,15 +223,13 @@ def evaluate_tags(data, channels, offsets, filters=None, verbose=True):
         if verbose:
             print("Phase: {}".format(sync_phase))
         meas_time = (data[1][-1] - data[1][0]) * 1E-12
-        if verbose:
-            print("Got {:.2e} Events in {:.0f}s after first SYNC".format(
-                len(data[0]), meas_time))
+        del sync_data
     else:
         t0 = data[1][1]
         meas_time = (data[1][-1] - t0) * 1E-12
-        if verbose:
-            print("Got {:.2e} Events in {:.0f}s".format(
-                len(data[0]), meas_time))
+
+    if verbose:
+        print("Got {:.2e} Events in {:.0f}s".format(len(data[0]), meas_time))
 
     if filters is None:
         temp_data = data.copy()
@@ -313,70 +241,56 @@ def evaluate_tags(data, channels, offsets, filters=None, verbose=True):
     for i in range(0, 5):
         data[1, data[0] == i + 1] += offsets[i] - sync_phase
 
-    del sync_phase, sync_data
-    phases = data % dt
+    del sync_phase
+
+    phases = np.vstack(
+        (data % dt, ((data[1] % (dt * key_length)) / dt).astype(int)))
     time_mask = np.logical_or(
         np.logical_and(phases[1] >= filters[0], phases[1] <= filters[1]),
         data[0] == channels["SYNC"]["ch"])
     data = data[:, time_mask]
 
-    sifted_events = data.copy()[:, data[0] != 5]
+    sifted_events = data[:, data[0] != 5]
     sifted_events[1] = sifted_events[1] // dt
 
     bins = np.zeros((key_length, 4))
+    pos_in_key = ((data[1] % (dt * key_length)) / dt).astype(int)
     for i in range(0, 4):
-        pos_in_key = ((data[1, data[0] == i + 1] % (dt * key_length)) /
-                      dt).astype(int)
-        unique_indices, counts = np.unique(pos_in_key, return_counts=True)
+        pos_in_key_pol = pos_in_key[data[0] == i + 1]
+        unique_indices, counts = np.unique(pos_in_key_pol, return_counts=True)
         for id, cnt in zip(unique_indices, counts):
             bins[id][i] += cnt
 
-    keys_sent = meas_time / (key_length * dt * 1E-12)
+    key_guess, qbers, num_sifted_det = guess_key(bins)
+    if sent_key is not None and sync_offset is None:
+        matching_symbols, sync_offset = compare_key(sent_key, key_guess)
+        if verbose:
+            if (matching_symbols == key_length):
+                print("Keys match with offset: {}".format(sync_offset))
+            else:
+                print("Keys match with {}/{} symbols, most likely offset: {}".
+                      format(matching_symbols, key_length, sync_offset))
+    used_key = np.array(key_guess)
+    if sent_key is not None and sync_offset is not None:
+        sent_key = (sent_key + sent_key)[sync_offset:sync_offset + key_length]
+        used_key = np.array(sent_key)
 
-    key_guess, qbers, detections, num_sifted_det = guess_key(bins, key_length)
-
-    det_probs_pol = []
-    for i in range(4):
-        probs = detections[key_guess == i] / keys_sent
-        det_probs_pol.append([probs.mean(), probs.std()])
-    det_probs_pol = np.array(det_probs_pol)
+    phases[2] = used_key[phases[2]]
 
     if verbose:
-        for i in range(4):
-            print(
-                "Detection Prob for {}: {:.6f}% with a std of {:.8f} rel: {:.2f}"
-                .format(inv_symbol_map[i + 1], det_probs_pol[i][0] * 100,
-                        det_probs_pol[i][1] * 100,
-                        det_probs_pol[i][0] / np.max(det_probs_pol[:, 0])))
-
         print("Mean Qber: {:.2f}% with std of {:.4f}".format(
             np.nanmean(qbers) * 100,
             np.nanstd(qbers) * 100))
         print("Max Qber: {:.2f}% at {}".format(
             np.max(qbers) * 100, bins[np.argmax(qbers)]))
-        print("Sifted key Rate: {:.2f}".format(num_sifted_det / meas_time))
+        print("Sifted key Rate: {:.2f}".format(
+            np.sum(num_sifted_det) / meas_time))
 
-    mus = []
-    for i in range(4):
-        pol_bin = bins[key_guess == i, :]
-        mu = pol_bin.sum() / meas_time / bob_eff / rep_rate / (
-            len(pol_bin) / key_length) * alice_trans
-        mus.append(mu)
-        if verbose:
-            print("Mean Photon Numbers for {}: {:.3f}".format(
-                inv_symbol_map[i + 1], mu))
-
-    labels = [
-        '{} μ={:.2f}'.format(inv_symbol_map[pol], mu)
-        for pol, mu in zip(inv_symbol_map, mus)
-    ]
+    mus = get_mu(bins, used_key)
 
     return [
-        offsets, filters,
-        [
-            phases, filters,
-            np.nanmean(qbers), num_sifted_det, meas_time, t0 * 1E-12, labels
-        ], sifted_events
+        phases, offsets, filters, sync_offset, qbers, num_sifted_det,
+        meas_time, t0 * 1E-12, sifted_events
     ]
 
 
@@ -410,147 +324,17 @@ def get_valid_frames(data, verbose=True):
     return np.concatenate(valid_frames, axis=1)
 
 
-def check_key(key_filename, key):
-    target_key = []
-    with open(key_filename, "r") as file:
-        for char in file.readline()[:-1]:
-            target_key.append(symbol_map[char.upper()] - 1)
-
-    temp_key = target_key + target_key
+def compare_key(sent_key, detected_key):
+    temp_key = sent_key + sent_key
     sames = []
-    for i in range(len(target_key)):
-        comp_key = temp_key[i:i + len(target_key)]
+    for i in range(len(sent_key)):
+        comp_key = temp_key[i:i + len(sent_key)]
         same = 0
-        for j in range(len(target_key)):
-            if (key[j] == comp_key[j]):
+        for j in range(len(sent_key)):
+            if (detected_key[j] == comp_key[j] % 4):
                 same += 1
         sames.append(same)
-    if (max(sames) == len(target_key)):
-        ind_offset = np.argmax(sames)
-        print("Keys match with offset: {}".format(ind_offset))
-    #else:
-    #    print(len(sames), max(sames), np.argmax(sames))
-    #    shift_key = temp_key[np.argmax(sames):np.argmax(sames) +
-    #                         len(target_key)]
-    #    sumcounts = [[], [], [], []]
-    #    for i in range(len(target_key)):
-    #        if (key[i] != shift_key[i]):
-    #            print(i, key[i], shift_key[i], bins[i], np.sum(bins[i]))
-    #        sumcounts[key[i]].append(np.sum(bins[i]))
-    #    for i in range(4):
-    #        print(i, np.mean(sumcounts[i]))
-
-
-def main():
-    file = sys.argv[1]
-    if not os.path.exists(file):
-        print("Cannot open {}".format(file))
-        sys.exit()
-    folder = os.path.dirname(file) + "/"
-    filename, file_extension = os.path.splitext(os.path.basename(file))
-
-    if file_extension == ".txt":
-        folder = "./data/measure_qber_" + time.strftime("%Y%m%d-%H%M%S") + "/"
-        filename = folder + filename
-        key_filename = filename + file_extension
-        os.makedirs(folder)
-        shutil.copyfile(file, key_filename)
-        # Turn on Alice:
-        source = AliceLmu(host="t14s", aliceSettings=aliceSettings)
-        source.turn_on()
-        source.send_key(key_filename)
-        # Measure clicks using Timetagger:
-        timestamp = TimeTaggerUltra(channels)
-        ts = timestamp.read(120)
-        save_ts(ts, filename + ".bin")
-        source.stop_key()
-    elif file_extension == ".ttbin":
-        # Measure clicks using Virtual Timetagger:
-        timestamp = TimeTaggerUltraVirtual(channels, file)
-        ts = timestamp.read(10)
-        save_ts(ts, filename + ".bin")
-        key_filename = folder + filename + ".txt"
-    else:
-        ts = load_ts(file)
-        key_filename = folder + filename + ".txt"
-
-    rd = ts.view(np.int64)
-
-    # simulate channel loss
-    np.random.seed(42)
-    nr = 0
-    e_id = 0
-    for i in range(1, nr):
-        b_id = int(np.random.random() * (len(rd[0]) / nr)) + e_id
-        e_id = int(np.random.random() * (len(rd[0]) / nr) + b_id)
-        shift = int(np.random.random() * 40000 + 500)
-        print(b_id, e_id, shift)
-        rdt = rd[:, b_id:e_id]
-        rdt = rdt[:, rdt[0] != 5]
-        rde = rd[:, e_id:]
-        rde[1] += shift
-        rd = np.concatenate([rd[:, :b_id], rdt, rde], axis=1)
-        print(len(rd[0]))
-    print((np.diff(rd[1]) > 0).all())
-
-    # simulate live data
-    rd[1] -= rd[1][0]
-    end = int(rd[1][-1] * 1E-12)
-    #datas = [
-    #    rd[:, np.logical_and(rd[1] > (i) * 1E12, rd[1] < (i + 1) * 1E12)]
-    #    for i in range(2)
-    #]
-    #for i, data in enumerate(datas):
-    #    save_ts(data, "frame{}.bin".format(i))
-    datas = [rd]
-    offsets = chan_offset
-    fig, ax = plt.subplots(figsize=(5, 3), dpi=400)
-    plt.show(block=False)
-    plt.pause(0.1)
-
-    try:
-        frame = -1
-        while True:
-            frame += 1
-            start = time.time()
-            data = datas[frame % len(datas)]
-            if len(data[0]) <= 0:
-                print("No Timestamps in frame")
-                continue
-            data = get_valid_frames(data, verbose=False)
-            start2 = time.time()
-            print("Valid Frames took: {:.2f}".format(start2 - start))
-            if len(data) <= 0:
-                print("No Sync detected in frame")
-                continue
-            offsets, filters, plot_data, sifted_events = evaluate_tags(
-                data, channels, offsets, verbose=False)
-            start3 = time.time()
-            print("Evaluate took: {:.2f}".format(start3 - start2))
-
-            plot_phase(*plot_data, frame=frame, fig=fig, ax=ax)
-            fig.canvas.flush_events()
-            start4 = time.time()
-            print("Plot took: {:.2f}".format(start4 - start3))
-            plt.pause(.1)
-            rgba = np.asarray(fig.canvas.buffer_rgba())
-            im = Image.fromarray(rgba)
-            im.save(folder + "phases{}.png".format(frame))
-            start5 = time.time()
-            print("Image took: {:.2f}".format(start5 - start4))
-            save_sifted(sifted_events, folder + "frame{}.csv".format(frame))
-            start6 = time.time()
-            print("Sifted took: {:.2f}".format(start6 - start5))
-            duration = time.time() - start
-            print("Frame {} done. {:.1f}fps".format(frame, 1 / duration))
-            duration = time.time() - start
-            del plot_data
-            if frame >= len(datas):
-                while plt.get_fignums():
-                    plt.pause(0.2)
-                break
-    except KeyboardInterrupt:
-        print("Exiting")
+    return max(sames), np.argmax(sames)
 
 
 class WorkerSignals(QObject):
@@ -581,7 +365,7 @@ class Worker(QRunnable):
                 QThread.sleep(1)
             i += 1
 
-    def loop(self, i):
+    def loop(self, frame):
         pass
 
     def pause(self):
@@ -604,31 +388,38 @@ class Plotter(Worker):
         self.mutex = QMutex()
         self.has_new_data = False
 
-    def loop(self, i):
+    def loop(self, frame):
         self.mutex.lock()
         if self.has_new_data:
-            frame = i
-            hists, bins, filters, label = self.plot_data
-            self.canvas.fig.clear()
-            ax = self.canvas.fig.add_subplot()
+            hists, bins, filters = self.plot_data
+            self.canvas.axes.cla()
+            ax = self.canvas.axes
             start = time.time()
-            hist = hists[self.nr]
-            hist_other = np.sum(
-                [hist for i, hist in enumerate(hists[:-1]) if i != self.nr],
-                axis=0) / 3
+            hist_sig = hists[self.nr]
+            hist_dec = hists[self.nr + 4]
+            hist_other = np.sum([
+                hist for i, hist in enumerate(hists[:-1])
+                if (i != self.nr and i != self.nr + 4)
+            ],
+                                axis=0) / 3
             ax.bar(bins[:-1],
-                   hist,
+                   hist_sig,
                    width=100,
                    alpha=0.4,
-                   label=label[self.nr],
+                   label=inv_symbol_map[self.nr + 1] + " Signal",
                    color="C{}".format(self.nr))
+            ax.bar(bins[:-1],
+                   hist_dec * 40,
+                   width=100,
+                   alpha=0.4,
+                   label=inv_symbol_map[self.nr + 1] + " Decoy",
+                   color="C{}".format(self.nr + 4))
             ax.bar(bins[:-1],
                    hist_other,
                    width=100,
                    alpha=0.6,
                    label="Rest",
                    color="gray")
-
             ax.bar(bins[:-1],
                    hists[-1],
                    width=100,
@@ -649,7 +440,6 @@ class Plotter(Worker):
 
             ax.set_xlabel("Detection time in ps")
             ax.set_ylabel("Number of detections")
-            #self.canvas.fig.tight_layout()
             print("plot took {:.2f}s".format(time.time() - start))
             start = time.time()
             self.canvas.draw()
@@ -666,15 +456,68 @@ class Plotter(Worker):
 class Evaluator(Worker):
     new_phase_data = pyqtSignal(object)
 
-    def __init__(self):
+    def __init__(self, folder, key_file):
         Worker.__init__(self)
         self.mutex = QMutex()
         self.maxi = 118
         self.offsets = chan_offset
+        self.folder = folder
+        self.key_file = key_file
+        self.loop_playback = True
+        self.data_files = []
+        self.get_data_files()
+        self.sent_key = None
+        self.sync_offset = None
+        self.verbose = True
+        if self.key_file != "":
+            self.get_key()
 
-    def loop(self, i):
+    def get_data_files(self):
+        for f in os.listdir(self.folder):
+            if f.endswith(".bin"):
+                self.data_files.append(f)
+        print(self.data_files)
+
+    def get_data(self, frame):
+        if len(self.data_files) != 0:
+            if self.loop_playback:
+                frame = frame % len(self.data_files)
+            else:
+                if frame >= len(self.data_files):
+                    time.sleep(1)
+                    return [[], []]
+            data = load_ts(self.folder + self.data_files[frame])
+            return data.view(np.int64)
+        else:
+            print("Live Measuring not implemented yet")
+            return [[], []]
+
+    def get_key(self):
+        self.sent_key = []
+        state_map = {
+            "H": 0,
+            "V": 1,
+            "P": 2,
+            "M": 3,
+            "h": 4,
+            "v": 5,
+            "p": 6,
+            "m": 7
+        }
+        with open(self.folder + self.key_file, "r") as file:
+            for char in file.readline()[:-1]:
+                self.sent_key.append(state_map[char])
+
+    def loop(self, frame):
+        print("Reading in Frame {}".format(frame))
+        if self.loop_playback:
+            frame = frame % len(self.data_files)
+        else:
+            if frame >= len(self.data_files):
+                time.sleep(1)
+                return
         start = time.time()
-        data = load_ts("data/gui_test/frame{}.bin".format(i % self.maxi))
+        data = load_ts(self.folder + self.data_files[frame])
         data = data.view(np.int64)
 
         if len(data[0]) <= 0:
@@ -684,20 +527,36 @@ class Evaluator(Worker):
         if len(data) <= 0:
             print("No Sync detected in frame")
             return
-        self.offsets, filters, plot_data, sifted_events = evaluate_tags(
-            data, channels, self.offsets, verbose=False)
-        phases = plot_data[0]
+        et = evaluate_tags(data,
+                           channels,
+                           self.offsets,
+                           sync_offset=self.sync_offset,
+                           sent_key=self.sent_key,
+                           verbose=self.verbose)
+        if len(et) == 0:
+            print("Evaluation error, continue")
+            return
+        phases, self.offsets, self.filters, self.sync_offset = et[:4]
+        qbers, num_sifted_det, meas_time, t0, sifted_events = et[4:]
+        self.verbose = False
         nmax = []
         hists = []
-        for i in range(0, 5):
-            hist, bins = np.histogram(phases[1, phases[0] == i + 1],
+        bins = []
+        phases_pol = phases[:, phases[0] != 5]
+        for pol in range(8):
+            hist, bins = np.histogram(phases_pol[1, phases_pol[2] == pol],
                                       bins=100,
                                       range=[0, dt])
             hists.append(hist)
             nmax.append(np.max(hist))
+        hist, bins = np.histogram(phases[1, phases[0] == 5],
+                                  bins=100,
+                                  range=[0, dt])
+        hists.append(hist)
+        nmax.append(np.max(hist))
+
         hists[-1] = hists[-1] * (np.mean(nmax[:-1]) / nmax[-1])
-        self.signals.new_phase_data.emit(
-            [hists, bins, plot_data[1], plot_data[-1]])
+        self.signals.new_phase_data.emit([hists, bins, self.filters])
         duration = time.time() - start
 
         print("eval took {:.2f}s".format(duration))
@@ -717,19 +576,12 @@ class Gui(QWidget):
     pause_signal = pyqtSignal()
     start_signal = pyqtSignal()
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, folder, key_file, *args, **kwargs):
         super(Gui, self).__init__(*args, **kwargs)
 
-        self.canvas = MplCanvas(self, width=5, height=4, dpi=100)
-        self.threads = {}
+        self.folder = folder
+        self.key_file = key_file
 
-        #self.show()
-
-        # Setup a timer to trigger the redraw by calling update_plot.
-        #self.timer = QtCore.QTimer()
-        #self.timer.setInterval(100)
-        #self.timer.timeout.connect(self.update_plot)
-        #self.timer.start()
         self.initUI()
 
     def initUI(self):
@@ -771,7 +623,7 @@ class Gui(QWidget):
         self.threadpool = QThreadPool()
         print("Multithreading with maximum %d threads" %
               self.threadpool.maxThreadCount())
-        evaluator = Evaluator()
+        evaluator = Evaluator(self.folder, self.key_file)
         self.threadpool.start(evaluator)
         self.stop_signal.connect(evaluator.kill)
         self.pause_signal.connect(evaluator.pause)
@@ -804,7 +656,31 @@ class Gui(QWidget):
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
-    gui = Gui()
+    key_file = ""
+    folder = ""
+    if len(sys.argv) > 1:
+        file = sys.argv[1]
+        if not os.path.exists(file):
+            print("Cannot open {}".format(file))
+            sys.exit()
+
+        if os.path.isdir(file):
+            folder = file + "/"
+            for f in os.listdir(file):
+                if f.endswith(".txt"):
+                    key_file = f
+        else:
+            filename, file_extension = os.path.splitext(os.path.basename(file))
+            if file_extension == ".txt":
+                folder = "./data/measure_qber_" + time.strftime(
+                    "%Y%m%d-%H%M%S") + "/"
+                key_file = folder + filename + file_extension
+                os.makedirs(folder)
+                shutil.copyfile(file, key_file)
+
+    print(folder, key_file)
+
+    gui = Gui(folder, key_file)
     a = app.exec_()
     gui.stop_threads()
     sys.exit(a)
