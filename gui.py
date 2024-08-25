@@ -4,9 +4,34 @@ import matplotlib
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 
-from PyQt5.QtWidgets import (QWidget, QPushButton, QApplication, QGridLayout,
-                             QFileDialog)
-from PyQt5.QtCore import QThread, QObject, pyqtSignal, QThreadPool, QRunnable, pyqtSlot, QMutex
+from PyQt5.QtWidgets import (
+    QWidget,
+    QPushButton,
+    QApplication,
+    QGridLayout,
+    QFileDialog,
+    QLabel,
+    QGroupBox,
+    QSpinBox,
+    QVBoxLayout,
+    QHBoxLayout,
+    QTextEdit,
+)
+from PyQt5.QtCore import (
+    Qt,
+    QThread,
+    QObject,
+    pyqtSignal,
+    QThreadPool,
+    QRunnable,
+    pyqtSlot,
+    QMutex,
+    QTimer,
+)
+
+from PyQt5.QtGui import (
+    QFont, )
+
 import numpy as np
 import time
 
@@ -60,23 +85,17 @@ channels = {
     }
 }
 
-aliceSettings = {
-    1: {
-        "H": [3, 255, 186, 100, 100 + 76],
-        "V": [3, 204, 197, 96, 96 + 70],
-        "P": [4, 237, 172, 117, 117 + 66],
-        "M": [3, 180, 176, 82, 82 + 63]
-    },
-    2: {
-        "H": [3, 236, 211, 100, 100 + 54],
-        "V": [3, 240, 235, 96, 96 + 54],
-        "P": [4, 193, 173, 117, 117 + 55],
-        "M": [3, 196, 192, 82, 82 + 53]
-    },
-}
-
+aliceSettings = [
+    [3, 236, 211, 100, 54],
+    [3, 240, 235, 96, 54],
+    [4, 193, 173, 117, 55],
+    [3, 196, 192, 82, 53],
+]
 symbol_map = {k: v["ch"] for k, v in channels.items() if k != "CLK"}
 inv_symbol_map = {v: k for k, v in symbol_map.items()}
+
+state_map = {"H": 0, "V": 1, "P": 2, "M": 3, "h": 4, "v": 5, "p": 6, "m": 7}
+inv_state_map = {v: k for k, v in state_map.items()}
 
 filter = 1.32 / 100
 bob_eff = filter * 25.3852 / 100
@@ -178,16 +197,6 @@ def find_filter(phases, height=0.8):
     ])
 
 
-def get_mu(bins, key):
-    mus = []
-    for pol in range(8):
-        pol_bin = bins[key == pol, :]
-        mu = pol_bin.sum() / meas_time / bob_eff / rep_rate / (
-            len(pol_bin) / len(bins)) * alice_trans
-        mus.append(mu)
-    return mus
-
-
 def evaluate_tags(
     data,
     channels,
@@ -286,11 +295,24 @@ def evaluate_tags(
         print("Sifted key Rate: {:.2f}".format(
             np.sum(num_sifted_det) / meas_time))
 
-    mus = get_mu(bins, used_key)
+    mus = []
+    for pol in range(8):
+        pol_bin = bins[used_key == pol, :]
+        mu = pol_bin.sum() / meas_time / bob_eff / rep_rate / (
+            len(pol_bin) / key_length) * alice_trans
+        mus.append(mu)
 
     return [
-        phases, offsets, filters, sync_offset, qbers, num_sifted_det,
-        meas_time, t0 * 1E-12, sifted_events
+        phases,
+        offsets,
+        filters,
+        sync_offset,
+        qbers,
+        num_sifted_det,
+        meas_time,
+        t0 * 1E-12,
+        sifted_events,
+        mus,
     ]
 
 
@@ -338,7 +360,7 @@ def compare_key(sent_key, detected_key):
 
 
 class WorkerSignals(QObject):
-    progress = pyqtSignal(int)
+    new_stat_data = pyqtSignal(object)
     new_phase_data = pyqtSignal(object)
     new_mu_data = pyqtSignal(object)
 
@@ -357,7 +379,6 @@ class Worker(QRunnable):
     def run(self):
         i = 0
         while self.is_running:
-            self.signals.progress.emit(i)
             self.loop(i)
             time.sleep(0.1)
             while self.is_paused and self.is_running:
@@ -378,7 +399,69 @@ class Worker(QRunnable):
         self.is_running = False
 
 
-class Plotter(Worker):
+class LinePlotter(Worker):
+
+    def __init__(self, canvas, nr):
+        Worker.__init__(self)
+        self.nr = nr
+        self.canvas = canvas
+        self.plot_data = []
+        self.mutex = QMutex()
+        self.has_new_data = False
+        self.xdata = None
+        self.ydata = None
+        self.frame = 0
+
+    def loop(self, frame):
+        if self.has_new_data:
+            self.mutex.lock()
+            self.has_new_data = False
+            mus, = self.plot_data
+            self.mutex.unlock()
+            self.canvas.axes.cla()
+            ax = self.canvas.axes
+            start = time.time()
+            if self.xdata is None:
+                self.xdata = []
+                self.ydata = []
+            if len(self.xdata) >= 10:
+                self.xdata = self.xdata[1:]
+                self.ydata = self.ydata[1:]
+            self.xdata.append(self.frame)
+            self.ydata.append([
+                mus[self.nr],
+                np.mean([mu for i, mu in enumerate(mus[:4]) if i != self.nr]),
+                mus[self.nr + 4] * 10,
+                np.mean([mu
+                         for i, mu in enumerate(mus[4:]) if i != self.nr]) * 10
+            ])
+            ax.plot(self.xdata,
+                    self.ydata,
+                    label=["$\\mu$", "$\\mu_r$", "$\\nu$", "$\\nu_r$"])
+            ax.legend(loc="center left")
+            ax.hlines([0.51, 0.15],
+                      self.xdata[0],
+                      self.xdata[-1],
+                      linestyles="dashed",
+                      colors="gray")
+
+            ax.set_title("$\\mu={:.2f}$\t$\\nu={:.2f}$".format(
+                self.ydata[-1][0], self.ydata[-1][2]))
+
+            ax.set_xlabel("Frame")
+            ax.set_ylabel("Mean photon number")
+            print("plot took {:.2f}s".format(time.time() - start))
+            self.canvas.draw()
+
+    def plot_new_data(self, data):
+        self.mutex.lock()
+        self.plot_data = data
+        self.has_new_data = True
+        self.frame += 1
+        self.mutex.unlock()
+
+
+class PhasePlotter(Worker):
 
     def __init__(self, canvas, nr):
         Worker.__init__(self)
@@ -389,14 +472,16 @@ class Plotter(Worker):
         self.has_new_data = False
 
     def loop(self, frame):
-        self.mutex.lock()
         if self.has_new_data:
+            self.mutex.lock()
+            self.has_new_data = False
             hists, bins, filters = self.plot_data
+            self.mutex.unlock()
             self.canvas.axes.cla()
             ax = self.canvas.axes
             start = time.time()
             hist_sig = hists[self.nr]
-            hist_dec = hists[self.nr + 4]
+            hist_dec = hists[self.nr + 4] * 40
             hist_other = np.sum([
                 hist for i, hist in enumerate(hists[:-1])
                 if (i != self.nr and i != self.nr + 4)
@@ -409,7 +494,7 @@ class Plotter(Worker):
                    label=inv_symbol_map[self.nr + 1] + " Signal",
                    color="C{}".format(self.nr))
             ax.bar(bins[:-1],
-                   hist_dec * 40,
+                   hist_dec,
                    width=100,
                    alpha=0.4,
                    label=inv_symbol_map[self.nr + 1] + " Decoy",
@@ -441,10 +526,7 @@ class Plotter(Worker):
             ax.set_xlabel("Detection time in ps")
             ax.set_ylabel("Number of detections")
             print("plot took {:.2f}s".format(time.time() - start))
-            start = time.time()
             self.canvas.draw()
-            self.has_new_data = False
-        self.mutex.unlock()
 
     def plot_new_data(self, data):
         self.mutex.lock()
@@ -459,7 +541,7 @@ class Evaluator(Worker):
     def __init__(self, folder, key_file):
         Worker.__init__(self)
         self.mutex = QMutex()
-        self.maxi = 118
+        self.frame = 0
         self.offsets = chan_offset
         self.folder = folder
         self.key_file = key_file
@@ -494,17 +576,8 @@ class Evaluator(Worker):
 
     def get_key(self):
         self.sent_key = []
-        state_map = {
-            "H": 0,
-            "V": 1,
-            "P": 2,
-            "M": 3,
-            "h": 4,
-            "v": 5,
-            "p": 6,
-            "m": 7
-        }
-        with open(self.folder + self.key_file, "r") as file:
+
+        with open(self.key_file, "r") as file:
             for char in file.readline()[:-1]:
                 self.sent_key.append(state_map[char])
 
@@ -537,7 +610,8 @@ class Evaluator(Worker):
             print("Evaluation error, continue")
             return
         phases, self.offsets, self.filters, self.sync_offset = et[:4]
-        qbers, num_sifted_det, meas_time, t0, sifted_events = et[4:]
+        qbers, num_sifted_det, meas_time, t0 = et[4:8]
+        sifted_events, mus = et[8:]
         self.verbose = False
         nmax = []
         hists = []
@@ -557,10 +631,19 @@ class Evaluator(Worker):
 
         hists[-1] = hists[-1] * (np.mean(nmax[:-1]) / nmax[-1])
         self.signals.new_phase_data.emit([hists, bins, self.filters])
+        self.signals.new_mu_data.emit([mus])
+        self.signals.new_stat_data.emit([
+            "{}".format(self.frame),
+            "{:.2f}%".format(np.mean(qbers) * 100),
+            "{:.2f}Kbit/s".format(np.sum(num_sifted_det) / meas_time / 1000),
+            "{:.0f}".format(self.sync_offset),
+        ])
+        self.frame += 1
         duration = time.time() - start
 
         print("eval took {:.2f}s".format(duration))
-        time.sleep(max(0, 1 - duration))
+        print("sleep for {}".format(max(0, 2 - duration)))
+        time.sleep(max(0, 2 - duration))
 
 
 class MplCanvas(FigureCanvas):
@@ -575,24 +658,31 @@ class Gui(QWidget):
     stop_signal = pyqtSignal()
     pause_signal = pyqtSignal()
     start_signal = pyqtSignal()
+    settings_changed_signal = pyqtSignal(object)
 
     def __init__(self, folder, key_file, *args, **kwargs):
         super(Gui, self).__init__(*args, **kwargs)
 
         self.folder = folder
         self.key_file = key_file
+        self.aliceSettingsSpinBoxes = []
+        self.settingsTimer = QTimer()
+        self.settingsTimer.setSingleShot(True)
+        self.settingsTimer.timeout.connect(self.updateSettings)
 
         self.initUI()
 
     def initUI(self):
         self.canvases = []
-        for i in range(4):
-            self.canvases.append(MplCanvas(self, width=5, height=4, dpi=100))
+        for i in range(8):
+            self.canvases.append(MplCanvas(self, width=4, height=5, dpi=100))
 
         # Buttons:
         self.btn_start = QPushButton('Start')
         self.btn_stop = QPushButton('Stop')
         self.btn_open = QPushButton('Open')
+
+        # Alice settings
 
         # GUI title, size, etc...
         self.setGeometry(300, 300, 300, 220)
@@ -600,9 +690,64 @@ class Gui(QWidget):
         self.layout = QGridLayout()
         self.layout.addWidget(self.btn_start, 0, 0)
         self.layout.addWidget(self.btn_stop, 0, 1)
-        self.layout.addWidget(self.btn_open, 1, 3)
-        for i, canvas in enumerate(self.canvases):
-            self.layout.addWidget(canvas, 1 + i, 0)
+        #self.layout.addWidget(self.btn_open, 1, 3)
+        for i in range(4):
+            laserGroup = QGroupBox("{} Polarization".format(inv_state_map[i]))
+            laserLayout = QGridLayout()
+            aliceSettingsGroup = QGroupBox("Laser Setting")
+            aliceSettingsLayout = QGridLayout()
+            settings = [["Bias", (0, 20), 0],
+                        ["Signal\nmodulation", (0, 255), 0],
+                        ["Decoy\nmodulation", (0, 255), 0],
+                        ["Pulse\ntiming", (0, 1023), 0],
+                        ["Pulse\nwidth", (0, 1023), 0]]
+            self.aliceSettingsSpinBoxes.append([])
+            for j in range(5):
+                settingsLabel = QLabel(settings[j][0])
+                settingsLabel.setAlignment(Qt.AlignCenter)
+                settingsSpinBox = QSpinBox()
+                self.aliceSettingsSpinBoxes[-1].append(settingsSpinBox)
+                settingsSpinBox.setAlignment(Qt.AlignCenter)
+                if j != 4:
+                    settingsSpinBox.setRange(*settings[j][1])
+                else:
+                    settingsSpinBox.setRange(0, 1023 - aliceSettings[i][j - 1])
+                settingsSpinBox.setValue(aliceSettings[i][j])
+                settingsSpinBox.valueChanged.connect(self.settingsChanged)
+                aliceSettingsLayout.addWidget(settingsLabel, 0, j)
+                aliceSettingsLayout.addWidget(settingsSpinBox, 1, j)
+            aliceSettingsGroup.setLayout(aliceSettingsLayout)
+
+            laserLayout.addWidget(self.canvases[i], 0, 0, 1, 1)
+            laserLayout.addWidget(self.canvases[i + 4], 1, 0, 1, 1)
+            laserLayout.addWidget(aliceSettingsGroup, 2, 0)
+            laserGroup.setLayout(laserLayout)
+
+            self.layout.addWidget(laserGroup, 1, i, 1, 1)
+
+        statisticsGroup = QGroupBox("Stats")
+        statisticsLayout = QGridLayout()
+        settings = [["Frame", (0, 255), 0], ["QBER", (0, 255), 0],
+                    ["Sifted Key Rate", (0, 1023), 0],
+                    ["Sync Offset", (0, 1023), 0], ["Key match", (0, 1023), 0]]
+        self.statTexts = []
+        for j in range(len(settings)):
+            statisticsLabel = QLabel(settings[j][0])
+            statisticsLabel.setAlignment(Qt.AlignRight)
+            cfont = QFont()
+            #cfont.setPointSize(18)
+            statisticsLabel.setFont(cfont)
+            statisticsText = QLabel("0.53")
+            self.statTexts.append(statisticsText)
+            statisticsText.setAlignment(Qt.AlignLeft)
+            statisticsLayout.addWidget(statisticsLabel, 0, 2 * j)
+            statisticsLayout.addWidget(statisticsText, 0, 1 + 2 * j)
+        statisticsGroup.setLayout(statisticsLayout)
+
+        self.layout.addWidget(statisticsGroup, 3, 0, 1, 4)
+
+        # for i, canvas in enumerate(self.canvases):
+        #     self.layout.addWidget(canvas, 1 + i, 0)
         self.setLayout(self.layout)
 
         geometry = app.desktop().availableGeometry()
@@ -619,6 +764,27 @@ class Gui(QWidget):
 
         self.show()
 
+    def updateStats(self, data):
+        for text, data in zip(self.statTexts, data):
+            text.setText(data)
+
+    def settingsChanged(self, data):
+        print("settings changed")
+        if self.settingsTimer.isActive():
+            self.settingsTimer.stop()
+        self.settingsTimer.start(500)
+
+    def updateSettings(self):
+        aliceSettings = []
+        for p in self.aliceSettingsSpinBoxes:
+            aliceSettings.append([])
+            for i, sbox in enumerate(p):
+                if i == 4:
+                    sbox.setRange(0, 1023 - p[i - 1].value())
+                aliceSettings[-1].append(sbox.value())
+        print("updating settings")
+        self.settings_changed_signal.emit(aliceSettings)
+
     def initWorkers(self):
         self.threadpool = QThreadPool()
         print("Multithreading with maximum %d threads" %
@@ -628,9 +794,18 @@ class Gui(QWidget):
         self.stop_signal.connect(evaluator.kill)
         self.pause_signal.connect(evaluator.pause)
         self.start_signal.connect(evaluator.resume)
+        evaluator.signals.new_stat_data.connect(self.updateStats,
+                                                Qt.QueuedConnection)
         for i in range(4):
-            plotter = Plotter(self.canvases[i], i)
+            plotter = PhasePlotter(self.canvases[i], i)
             evaluator.signals.new_phase_data.connect(plotter.plot_new_data)
+            self.threadpool.start(plotter)
+            self.stop_signal.connect(plotter.kill)
+            self.pause_signal.connect(plotter.pause)
+            self.start_signal.connect(plotter.resume)
+        for i in range(4):
+            plotter = LinePlotter(self.canvases[i + 4], i)
+            evaluator.signals.new_mu_data.connect(plotter.plot_new_data)
             self.threadpool.start(plotter)
             self.stop_signal.connect(plotter.kill)
             self.pause_signal.connect(plotter.pause)
@@ -668,7 +843,7 @@ if __name__ == '__main__':
             folder = file + "/"
             for f in os.listdir(file):
                 if f.endswith(".txt"):
-                    key_file = f
+                    key_file = folder + f
         else:
             filename, file_extension = os.path.splitext(os.path.basename(file))
             if file_extension == ".txt":
