@@ -271,12 +271,15 @@ def evaluate_tags(
             bins[id][i] += cnt
 
     key_guess, qbers, num_sifted_det = guess_key(bins)
+    keymatch = None
     if sent_key is not None and sync_offset is None:
         matching_symbols, sync_offset = compare_key(sent_key, key_guess)
         if verbose:
             if (matching_symbols == key_length):
                 print("Keys match with offset: {}".format(sync_offset))
             else:
+                keymatch = "{}/{}".format(matching_symbols, key_length)
+
                 print("Keys match with {}/{} symbols, most likely offset: {}".
                       format(matching_symbols, key_length, sync_offset))
     used_key = np.array(key_guess)
@@ -303,16 +306,8 @@ def evaluate_tags(
         mus.append(mu)
 
     return [
-        phases,
-        offsets,
-        filters,
-        sync_offset,
-        qbers,
-        num_sifted_det,
-        meas_time,
-        t0 * 1E-12,
-        sifted_events,
-        mus,
+        phases, offsets, filters, sync_offset, qbers, num_sifted_det,
+        meas_time, t0 * 1E-12, sifted_events, mus, keymatch
     ]
 
 
@@ -363,6 +358,8 @@ class WorkerSignals(QObject):
     new_stat_data = pyqtSignal(object)
     new_phase_data = pyqtSignal(object)
     new_mu_data = pyqtSignal(object)
+    new_measurement_data = pyqtSignal(int)
+    new_settings_applied = pyqtSignal()
 
 
 class Worker(QRunnable):
@@ -535,8 +532,97 @@ class PhasePlotter(Worker):
         self.mutex.unlock()
 
 
+measurement_data = []
+measurement_data_mutex = QMutex()
+
+
+class Experimentor(Worker):
+
+    def __init__(self, mode, folder, key_file):
+        Worker.__init__(self)
+        self.mode = mode
+        self.data_files = []
+        self.folder = folder
+        self.key_file = key_file
+        self.loop_playback = True
+        self.stoped = True
+        if self.mode == 0:
+            self.initPlayback()
+            self.alice = AliceLmu()
+        else:
+            self.initMeasurement()
+
+    def initPlayback(self):
+        self.get_data_files()
+
+    def initMeasurement(self):
+        self.alice = AliceLmu()
+        self.timestamp = TimeTaggerUltra(channels)
+
+    def reset_Measurement(self, settings):
+        print("Resetting measurement")
+        self.set_aliceSettings(settings)
+        self.stream.stop()
+        self.stoped = True
+
+    def set_aliceSettings(self, settings):
+        aliceSettings = {0: {}}
+        pols = ["H", "V", "P", "M"]
+        for i, pol in enumerate(settings):
+            pol = pol[:-1] + [pol[-2] + pol[-1]]
+            aliceSettings[0][pols[i]] = pol
+        print(aliceSettings)
+        self.alice = AliceLmu(aliceSettings=aliceSettings)
+        self.alice.turn_off()
+        self.alice.turn_on(set=0)
+        self.signals.new_settings_applied.emit()
+
+    def get_data_files(self):
+        for f in os.listdir(self.folder):
+            if f.endswith(".bin"):
+                self.data_files.append(f)
+        print(self.data_files)
+
+    def loop(self, frame):
+        global measurement_data
+        if self.mode == 0:
+            if self.loop_playback:
+                frame = frame % len(self.data_files)
+            else:
+                if frame >= len(self.data_files):
+                    time.sleep(1)
+                    return
+            print("Reading Frame {}".format(frame))
+            data = load_ts(self.folder + self.data_files[frame])
+            measurement_data_mutex.lock()
+            measurement_data = data.view(np.int64).copy()
+            measurement_data_mutex.unlock()
+            self.signals.new_measurement_data.emit(frame)
+            time.sleep(1)
+        else:
+            import TimeTagger
+            self.stream = TimeTagger.TimeTagStream(
+                self.timestamp.tt, 1E9, self.timestamp.channels_measure)
+            print("Measurement started")
+            self.stream.startFor(2E12)
+            self.stream.waitUntilFinished()
+            print("Done")
+            if self.stoped:
+                print("stoped")
+                return
+            data = self.stream.getData()
+            self.stream.stop()
+            scs = self.timestamp.tt.getSoftwareClockState()
+            if scs.error_counter != 0:
+                print("Clock errors detected")
+            measurement_data_mutex.lock()
+            measurement_data = np.array(
+                [data.getChannels(), data.getTimestamps()]).copy()
+            measurement_data_mutex.unlock()
+            self.signals.new_measurement_data.emit(frame)
+
+
 class Evaluator(Worker):
-    new_phase_data = pyqtSignal(object)
 
     def __init__(self, folder, key_file):
         Worker.__init__(self)
@@ -546,33 +632,20 @@ class Evaluator(Worker):
         self.folder = folder
         self.key_file = key_file
         self.loop_playback = True
-        self.data_files = []
-        self.get_data_files()
         self.sent_key = None
         self.sync_offset = None
         self.verbose = True
+        self.key_match = "No Key"
+        self.has_new_data = False
+        self.frame = 0
         if self.key_file != "":
             self.get_key()
 
     def get_data_files(self):
         for f in os.listdir(self.folder):
             if f.endswith(".bin"):
-                self.data_files.append(f)
+                self.data_file.append(f)
         print(self.data_files)
-
-    def get_data(self, frame):
-        if len(self.data_files) != 0:
-            if self.loop_playback:
-                frame = frame % len(self.data_files)
-            else:
-                if frame >= len(self.data_files):
-                    time.sleep(1)
-                    return [[], []]
-            data = load_ts(self.folder + self.data_files[frame])
-            return data.view(np.int64)
-        else:
-            print("Live Measuring not implemented yet")
-            return [[], []]
 
     def get_key(self):
         self.sent_key = []
@@ -581,69 +654,82 @@ class Evaluator(Worker):
             for char in file.readline()[:-1]:
                 self.sent_key.append(state_map[char])
 
-    def loop(self, frame):
-        print("Reading in Frame {}".format(frame))
-        if self.loop_playback:
-            frame = frame % len(self.data_files)
-        else:
-            if frame >= len(self.data_files):
-                time.sleep(1)
-                return
-        start = time.time()
-        data = load_ts(self.folder + self.data_files[frame])
-        data = data.view(np.int64)
+    def reset_Evaluation(self):
+        print("Resetting evaluation")
+        self.offsets = chan_offset
+        self.sync_offset = None
+        self.verbose = True
+        print(self.sync_offset, self.verbose)
 
-        if len(data[0]) <= 0:
-            print("No Timestamps in frame")
-            return
-        data = get_valid_frames(data, verbose=False)
-        if len(data) <= 0:
-            print("No Sync detected in frame")
-            return
-        et = evaluate_tags(data,
-                           channels,
-                           self.offsets,
-                           sync_offset=self.sync_offset,
-                           sent_key=self.sent_key,
-                           verbose=self.verbose)
-        if len(et) == 0:
-            print("Evaluation error, continue")
-            return
-        phases, self.offsets, self.filters, self.sync_offset = et[:4]
-        qbers, num_sifted_det, meas_time, t0 = et[4:8]
-        sifted_events, mus = et[8:]
-        self.verbose = False
-        nmax = []
-        hists = []
-        bins = []
-        phases_pol = phases[:, phases[0] != 5]
-        for pol in range(8):
-            hist, bins = np.histogram(phases_pol[1, phases_pol[2] == pol],
+    def loop(self, i):
+
+        if self.has_new_data:
+            frame = self.frame
+            print("Evaluating Frame {}".format(frame))
+            start = time.time()
+            data = self.data.copy()
+            self.has_new_data = False
+            self.frame += 1
+
+            if len(data[0]) <= 0:
+                print("No Timestamps in frame")
+                return
+            data = get_valid_frames(data, verbose=False)
+            if len(data) <= 0:
+                print("No Sync detected in frame")
+                return
+            et = evaluate_tags(data,
+                               channels,
+                               self.offsets,
+                               sync_offset=self.sync_offset,
+                               sent_key=self.sent_key,
+                               verbose=self.verbose)
+            if len(et) == 0:
+                print("Evaluation error, continue")
+                return
+            phases, self.offsets, self.filters, self.sync_offset = et[:4]
+            qbers, num_sifted_det, meas_time, t0 = et[4:8]
+            sifted_events, mus, key_match = et[8:]
+            if key_match is not None:
+                self.key_match = key_match
+
+            self.verbose = False
+            nmax = []
+            hists = []
+            bins = []
+            phases_pol = phases[:, phases[0] != 5]
+            for pol in range(8):
+                hist, bins = np.histogram(phases_pol[1, phases_pol[2] == pol],
+                                          bins=100,
+                                          range=[0, dt])
+                hists.append(hist)
+                nmax.append(np.max(hist))
+            hist, bins = np.histogram(phases[1, phases[0] == 5],
                                       bins=100,
                                       range=[0, dt])
             hists.append(hist)
             nmax.append(np.max(hist))
-        hist, bins = np.histogram(phases[1, phases[0] == 5],
-                                  bins=100,
-                                  range=[0, dt])
-        hists.append(hist)
-        nmax.append(np.max(hist))
 
-        hists[-1] = hists[-1] * (np.mean(nmax[:-1]) / nmax[-1])
-        self.signals.new_phase_data.emit([hists, bins, self.filters])
-        self.signals.new_mu_data.emit([mus])
-        self.signals.new_stat_data.emit([
-            "{}".format(self.frame),
-            "{:.2f}%".format(np.mean(qbers) * 100),
-            "{:.2f}Kbit/s".format(np.sum(num_sifted_det) / meas_time / 1000),
-            "{:.0f}".format(self.sync_offset),
-        ])
-        self.frame += 1
-        duration = time.time() - start
+            hists[-1] = hists[-1] * (np.mean(nmax[:-1]) / nmax[-1])
+            self.signals.new_phase_data.emit([hists, bins, self.filters])
+            self.signals.new_mu_data.emit([mus])
+            self.signals.new_stat_data.emit([
+                "{}".format(self.frame), "{:.2f}% ± {:.2f}%".format(
+                    np.mean(qbers) * 100,
+                    np.std(qbers) * 100), "{:.2f}Kbit/s".format(
+                        np.sum(num_sifted_det) / meas_time / 1000),
+                "{:.0f}".format(self.sync_offset), self.key_match
+            ])
+            duration = time.time() - start
 
-        print("eval took {:.2f}s".format(duration))
-        print("sleep for {}".format(max(0, 2 - duration)))
-        time.sleep(max(0, 2 - duration))
+            print("eval took {:.2f}s".format(duration))
+
+    def evaluate_new_data(self, frame):
+        measurement_data_mutex.lock()
+        self.data = measurement_data.copy()
+        self.has_new_data = True
+        self.frame = frame
+        measurement_data_mutex.unlock()
 
 
 class MplCanvas(FigureCanvas):
@@ -660,7 +746,7 @@ class Gui(QWidget):
     start_signal = pyqtSignal()
     settings_changed_signal = pyqtSignal(object)
 
-    def __init__(self, folder, key_file, *args, **kwargs):
+    def __init__(self, mode, folder, key_file, *args, **kwargs):
         super(Gui, self).__init__(*args, **kwargs)
 
         self.folder = folder
@@ -669,7 +755,9 @@ class Gui(QWidget):
         self.settingsTimer = QTimer()
         self.settingsTimer.setSingleShot(True)
         self.settingsTimer.timeout.connect(self.updateSettings)
-
+        self.settings_changed_signal.connect(self.saveSettings)
+        self.frame = 0
+        self.mode = mode
         self.initUI()
 
     def initUI(self):
@@ -713,7 +801,10 @@ class Gui(QWidget):
                 else:
                     settingsSpinBox.setRange(0, 1023 - aliceSettings[i][j - 1])
                 settingsSpinBox.setValue(aliceSettings[i][j])
-                settingsSpinBox.valueChanged.connect(self.settingsChanged)
+                if self.mode == 0:
+                    settingsSpinBox.setEnabled(False)
+                else:
+                    settingsSpinBox.valueChanged.connect(self.settingsChanged)
                 aliceSettingsLayout.addWidget(settingsLabel, 0, j)
                 aliceSettingsLayout.addWidget(settingsSpinBox, 1, j)
             aliceSettingsGroup.setLayout(aliceSettingsLayout)
@@ -764,9 +855,24 @@ class Gui(QWidget):
 
         self.show()
 
+    def updateLaser(self, data):
+        pass
+
     def updateStats(self, data):
+        self.frame = int(data[0])
         for text, data in zip(self.statTexts, data):
             text.setText(data)
+
+    def saveSettings(self, settings):
+        with open(self.folder + "aliceSettings.csv", "a") as f:
+            f.writelines("{}\t{}\n".format(self.frame, settings))
+
+    def loadSettings(self, settings):
+        path = self.folder + "aliceSettings.csv"
+        if os.path.isfile(path):
+            with open(path, "r") as f:
+                for line in f.readlines:
+                    frame, settings = line[:-1].split("\t")
 
     def settingsChanged(self, data):
         print("settings changed")
@@ -782,13 +888,19 @@ class Gui(QWidget):
                 if i == 4:
                     sbox.setRange(0, 1023 - p[i - 1].value())
                 aliceSettings[-1].append(sbox.value())
-        print("updating settings")
+        print("updating settings", aliceSettings)
         self.settings_changed_signal.emit(aliceSettings)
 
     def initWorkers(self):
         self.threadpool = QThreadPool()
         print("Multithreading with maximum %d threads" %
               self.threadpool.maxThreadCount())
+        experimentor = Experimentor(self.mode, self.folder, self.key_file)
+        self.threadpool.start(experimentor)
+        self.stop_signal.connect(experimentor.kill)
+        self.pause_signal.connect(experimentor.pause)
+        self.start_signal.connect(experimentor.resume)
+        self.settings_changed_signal.connect(experimentor.reset_Measurement)
         evaluator = Evaluator(self.folder, self.key_file)
         self.threadpool.start(evaluator)
         self.stop_signal.connect(evaluator.kill)
@@ -796,6 +908,13 @@ class Gui(QWidget):
         self.start_signal.connect(evaluator.resume)
         evaluator.signals.new_stat_data.connect(self.updateStats,
                                                 Qt.QueuedConnection)
+        if mode == 0:
+            evaluator.signals.new_stat_data.connect(self.updateLaser,
+                                                    Qt.QueuedConnection)
+        experimentor.signals.new_measurement_data.connect(
+            evaluator.evaluate_new_data)
+        experimentor.signals.new_settings_applied.connect(
+            evaluator.reset_Evaluation)
         for i in range(4):
             plotter = PhasePlotter(self.canvases[i], i)
             evaluator.signals.new_phase_data.connect(plotter.plot_new_data)
@@ -833,6 +952,7 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     key_file = ""
     folder = ""
+    mode = 0
     if len(sys.argv) > 1:
         file = sys.argv[1]
         if not os.path.exists(file):
@@ -844,6 +964,7 @@ if __name__ == '__main__':
             for f in os.listdir(file):
                 if f.endswith(".txt"):
                     key_file = folder + f
+            mode = 0
         else:
             filename, file_extension = os.path.splitext(os.path.basename(file))
             if file_extension == ".txt":
@@ -852,10 +973,9 @@ if __name__ == '__main__':
                 key_file = folder + filename + file_extension
                 os.makedirs(folder)
                 shutil.copyfile(file, key_file)
+                mode = 1
 
-    print(folder, key_file)
-
-    gui = Gui(folder, key_file)
+    gui = Gui(mode, folder, key_file)
     a = app.exec_()
     gui.stop_threads()
     sys.exit(a)
