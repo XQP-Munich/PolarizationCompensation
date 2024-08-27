@@ -13,6 +13,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QGroupBox,
     QSpinBox,
+    QCheckBox,
     QVBoxLayout,
     QHBoxLayout,
     QTextEdit,
@@ -216,7 +217,7 @@ def evaluate_tags(
 ):
     sync_data = data[1][data[0] == channels["SYNC"]["ch"]]
     sync_phase = 0
-    sync_offset = 6
+    #sync_offset = 6
     if sent_key is not None:
         key_length = len(sent_key)
     if sync_data.size != 0:
@@ -252,8 +253,13 @@ def evaluate_tags(
         temp_data = data.copy()
         for i in range(0, 5):
             temp_data[1, temp_data[0] == i + 1] += offsets[i]
-        shifts, filters, = find_filter(temp_data % dt)
-        offsets += shifts + sync_phase
+        try:
+            shifts, filters, = find_filter(temp_data % dt)
+            offsets += shifts + sync_phase
+        except:
+            print("Unable to find peaks")
+            offsets += sync_phase
+            filters = [0, dt]
     for i in range(0, 5):
         data[1, data[0] == i + 1] += offsets[i] - sync_phase
 
@@ -637,6 +643,37 @@ class Experimentor(Worker):
             time.sleep(1)
 
 
+class FileWriter(Worker):
+
+    def __init__(self, folder, key_file, mutex, data):
+        Worker.__init__(self)
+        self.int_mutex = QMutex()
+        self.ext_mutex = mutex
+        self.ext_data = data
+        self.data = []
+        self.frame = 0
+        self.folder = folder
+        self.has_new_data = False
+
+    def loop(self, i):
+        self.int_mutex.lock()
+        if self.has_new_data:
+            print("Evaluating Frame {}".format(self.frame))
+            data = self.data.copy()
+            self.has_new_data = False
+            print(data)
+        self.int_mutex.unlock()
+
+    def evaluate_new_data(self, frame):
+        self.int_mutex.lock()
+        self.ext_mutex.lock()
+        self.data = self.ext_data.copy()
+        self.has_new_data = True
+        self.frame = frame
+        self.ext_mutex.unlock()
+        self.int_mutex.unlock()
+
+
 class Evaluator(Worker):
 
     def __init__(self, folder, key_file):
@@ -788,6 +825,9 @@ class Gui(QWidget):
         self.btn_set = QPushButton('Set Alice')
         self.btn_set.clicked.connect(self.updateSettings)
 
+        self.check_save_raw = QCheckBox("Save raw Data")
+        self.check_save_sifted = QCheckBox("Save sifted Data")
+
         # Alice settings
 
         # GUI title, size, etc...
@@ -796,6 +836,15 @@ class Gui(QWidget):
         self.layout = QGridLayout()
         self.layout.addWidget(self.btn_start, 0, 0)
         self.layout.addWidget(self.btn_stop, 0, 1)
+
+        self.cb_widget = QWidget()
+        self.cb_layout = QHBoxLayout()
+        self.cb_layout.addWidget(self.check_save_raw)
+        self.cb_layout.addWidget(self.check_save_sifted)
+        self.cb_widget.setLayout(self.cb_layout)
+
+        self.layout.addWidget(self.cb_widget, 0, 2)
+
         self.layout.addWidget(self.btn_set, 0, 3)
         #self.layout.addWidget(self.btn_open, 1, 3)
         for i in range(4):
