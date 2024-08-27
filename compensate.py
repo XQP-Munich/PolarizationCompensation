@@ -41,14 +41,14 @@ channels = {
     }
 }
 
-send_pol = ["V", "P"]
+send_pol = ["H", "P"]
 waveplate_setup = ["QWP", "HWP", "QWP"]
-aliceSettings = {
-    "H": [0, 0, 0, 100, 175],
-    "V": [14, 0, 0, 100, 175],
-    "P": [0, 0, 0, 100, 175],
-    "M": [15, 0, 0, 100, 172]
-}
+aliceSettings = {1:{
+    "H": [15, 0, 0, 100, 175],
+    "V": [10, 0, 0, 100, 175],
+    "P": [10, 0, 0, 100, 175],
+    "M": [10, 0, 0, 100, 172]
+}}
 
 if __name__ == "__main__":
     symbol_map = {k: v["ch"] - 1 for k, v in channels.items() if k != "CLK"}
@@ -72,7 +72,7 @@ if __name__ == "__main__":
                                 hwp_angle0=[0, 0, 90],
                                 hwp_speed=[1, 1, 1],
                                 qwp_angle0=[135, 112.5, 135])
-        source = AliceLmu("t14s")
+        source = AliceLmu("t14s",aliceSettings=aliceSettings)
         timestamp = TimeTaggerUltra(channels)
 
         # Do this every time it is moved

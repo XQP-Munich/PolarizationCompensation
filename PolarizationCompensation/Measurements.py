@@ -10,7 +10,7 @@ def measure_Coupling_Efficiency_cont(source, waveplates, timestamp):
 
     source.turn_off()
     waveplates.home()
-    source.turn_on("V")
+    source.turn_on("H")
 
     waveplates.jog_like_HWP(deg_per_sec)
     timestamp.read(int(angle_max / deg_per_sec))

@@ -84,13 +84,20 @@ channels = {
         "trigger": 0.25
     }
 }
-
+#50/50
 aliceSettings = [
-    [3, 236, 211, 100, 54],
-    [3, 240, 235, 96, 54],
-    [4, 193, 173, 117, 55],
-    [3, 196, 192, 82, 53],
+    [3, 230, 233, 700, 54],
+    [3, 231, 235, 696, 54],
+    [4, 190, 186, 717, 55],
+    [4, 163, 176, 682, 59],
 ]
+70 / 30
+#aliceSettings = [
+#    [3, 230, 238, 700, 54],
+#    [3, 236, 241, 696, 54],
+#    [4, 189, 184, 717, 55],
+#    [4, 159, 173, 682, 58],
+#]
 symbol_map = {k: v["ch"] for k, v in channels.items() if k != "CLK"}
 inv_symbol_map = {v: k for k, v in symbol_map.items()}
 
@@ -209,6 +216,7 @@ def evaluate_tags(
 ):
     sync_data = data[1][data[0] == channels["SYNC"]["ch"]]
     sync_phase = 0
+    sync_offset = 6
     if sent_key is not None:
         key_length = len(sent_key)
     if sync_data.size != 0:
@@ -246,7 +254,6 @@ def evaluate_tags(
             temp_data[1, temp_data[0] == i + 1] += offsets[i]
         shifts, filters, = find_filter(temp_data % dt)
         offsets += shifts + sync_phase
-
     for i in range(0, 5):
         data[1, data[0] == i + 1] += offsets[i] - sync_phase
 
@@ -428,9 +435,8 @@ class LinePlotter(Worker):
             self.ydata.append([
                 mus[self.nr],
                 np.mean([mu for i, mu in enumerate(mus[:4]) if i != self.nr]),
-                mus[self.nr + 4] * 10,
-                np.mean([mu
-                         for i, mu in enumerate(mus[4:]) if i != self.nr]) * 10
+                mus[self.nr + 4],
+                np.mean([mu for i, mu in enumerate(mus[4:]) if i != self.nr])
             ])
             ax.plot(self.xdata,
                     self.ydata,
@@ -478,7 +484,7 @@ class PhasePlotter(Worker):
             ax = self.canvas.axes
             start = time.time()
             hist_sig = hists[self.nr]
-            hist_dec = hists[self.nr + 4] * 40
+            hist_dec = hists[self.nr + 4]
             hist_other = np.sum([
                 hist for i, hist in enumerate(hists[:-1])
                 if (i != self.nr and i != self.nr + 4)
@@ -545,10 +551,12 @@ class Experimentor(Worker):
         self.folder = folder
         self.key_file = key_file
         self.loop_playback = True
-        self.stoped = True
+        self.stoped = False
+        self.reset = False
+        self.stream = None
         if self.mode == 0:
             self.initPlayback()
-            self.alice = AliceLmu()
+            self.alice = AliceLmu("t14s")
         else:
             self.initMeasurement()
 
@@ -562,8 +570,10 @@ class Experimentor(Worker):
     def reset_Measurement(self, settings):
         print("Resetting measurement")
         self.set_aliceSettings(settings)
-        self.stream.stop()
-        self.stoped = True
+        if not self.stoped:
+            self.stream.stop()
+        self.reset = True
+        self.stoped = False
 
     def set_aliceSettings(self, settings):
         aliceSettings = {0: {}}
@@ -572,9 +582,10 @@ class Experimentor(Worker):
             pol = pol[:-1] + [pol[-2] + pol[-1]]
             aliceSettings[0][pols[i]] = pol
         print(aliceSettings)
-        self.alice = AliceLmu(aliceSettings=aliceSettings)
+        self.alice = AliceLmu("t14s", aliceSettings=aliceSettings)
         self.alice.turn_off()
         self.alice.turn_on(set=0)
+        self.alice.send_key(self.key_file)
         self.signals.new_settings_applied.emit()
 
     def get_data_files(self):
@@ -599,16 +610,17 @@ class Experimentor(Worker):
             measurement_data_mutex.unlock()
             self.signals.new_measurement_data.emit(frame)
             time.sleep(1)
-        else:
+        elif not self.stoped:
+            self.reset = False
             import TimeTagger
             self.stream = TimeTagger.TimeTagStream(
                 self.timestamp.tt, 1E9, self.timestamp.channels_measure)
             print("Measurement started")
-            self.stream.startFor(2E12)
+            self.stream.startFor(5E12)
             self.stream.waitUntilFinished()
             print("Done")
-            if self.stoped:
-                print("stoped")
+            if self.reset:
+                print("reset")
                 return
             data = self.stream.getData()
             self.stream.stop()
@@ -620,6 +632,9 @@ class Experimentor(Worker):
                 [data.getChannels(), data.getTimestamps()]).copy()
             measurement_data_mutex.unlock()
             self.signals.new_measurement_data.emit(frame)
+        else:
+            print("stoped")
+            time.sleep(1)
 
 
 class Evaluator(Worker):
@@ -688,6 +703,7 @@ class Evaluator(Worker):
                 print("Evaluation error, continue")
                 return
             phases, self.offsets, self.filters, self.sync_offset = et[:4]
+            print(self.offsets)
             qbers, num_sifted_det, meas_time, t0 = et[4:8]
             sifted_events, mus, key_match = et[8:]
             if key_match is not None:
@@ -754,7 +770,7 @@ class Gui(QWidget):
         self.aliceSettingsSpinBoxes = []
         self.settingsTimer = QTimer()
         self.settingsTimer.setSingleShot(True)
-        self.settingsTimer.timeout.connect(self.updateSettings)
+        #self.settingsTimer.timeout.connect(self.updateSettings)
         self.settings_changed_signal.connect(self.saveSettings)
         self.frame = 0
         self.mode = mode
@@ -769,6 +785,8 @@ class Gui(QWidget):
         self.btn_start = QPushButton('Start')
         self.btn_stop = QPushButton('Stop')
         self.btn_open = QPushButton('Open')
+        self.btn_set = QPushButton('Set Alice')
+        self.btn_set.clicked.connect(self.updateSettings)
 
         # Alice settings
 
@@ -778,6 +796,7 @@ class Gui(QWidget):
         self.layout = QGridLayout()
         self.layout.addWidget(self.btn_start, 0, 0)
         self.layout.addWidget(self.btn_stop, 0, 1)
+        self.layout.addWidget(self.btn_set, 0, 3)
         #self.layout.addWidget(self.btn_open, 1, 3)
         for i in range(4):
             laserGroup = QGroupBox("{} Polarization".format(inv_state_map[i]))
