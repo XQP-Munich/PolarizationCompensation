@@ -4,6 +4,66 @@ import numpy as np
 
 from Devices.Templates import SOURCE
 
+aliceConfig = """#AliceControl configuration file
+#General Configuration
+[general]
+version = "1.0.0"
+
+[io]
+inputFile = ""
+outputFile = ""
+
+#Key Configuration
+[key]
+basisRatio = 0.5
+bitsPerChoice = 1
+#in Symbols
+blockLength = 8386752
+decoyRatio = 0.5
+#in Symbols max todo: 134216912 +4 nw +32 w why? / 118292480 <-working  / 8871936 <- to small?
+keyChunkSize = 8386752
+#in Byte
+randomChunkSize = 1000000
+randomFile = "/dev/urandom"
+
+#Laser Configuration
+[laserConfig]
+
+[laserConfig.channel1]
+bias = {}
+delayA = {}
+delayB = {}
+modDec = {}
+modSig = {}
+
+[laserConfig.channel2]
+bias = {}
+delayA = {}
+delayB = {}
+modDec = {}
+modSig = {}
+
+[laserConfig.channel3]
+bias = {}
+delayA = {}
+delayB = {}
+modDec = {}
+modSig = {}
+
+[laserConfig.channel4]
+bias = {}
+delayA = {}
+delayB = {}
+modDec = {}
+modSig = {}
+
+
+#TCP Configuration
+[tcp]
+tcpAddress = ""
+#in Symbols fixed by AIT
+tcpChunkSize = 2888"""
+
 
 class AliceLmu(SOURCE):
 
@@ -24,15 +84,23 @@ class AliceLmu(SOURCE):
             }
 
     def turn_on(self, pol=None, set=1):
-        if not pol:
-            pol = ["H", "V", "P", "M"]
-        else:
-            pol = [pol]
-        for p in pol:
-            print("Turn on pol: {}".format(p))
+        if pol:
+            print("Turn on pol: {}".format(pol))
             self._send_command(
-                self.commandLine.format(self.channel_map[p],
-                                        *self.aliceSettings[set][p]))
+                self.commandLine.format(self.channel_map[pol],
+                                        *self.aliceSettings[set][pol]))
+        else:
+            with open("aliceConfig.toml", "w") as f:
+                f.writelines(
+                    aliceConfig.format(*self.aliceSettings[set]["H"],
+                                       *self.aliceSettings[set]["V"],
+                                       *self.aliceSettings[set]["P"],
+                                       *self.aliceSettings[set]["M"]))
+            if not self.host == "local":
+                self._send_command("scp {} {}:~/{}".format(
+                    "aliceConfig.toml", self.host, "aliceConfig.toml"),
+                                   forcelocal=True)
+            self._send_command("alice-control")
 
     def turn_off(self):
         print("Turning off Laser")

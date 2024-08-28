@@ -92,13 +92,19 @@ aliceSettings = [
     [4, 190, 186, 717, 55],
     [4, 163, 176, 682, 59],
 ]
-70 / 30
-#aliceSettings = [
-#    [3, 230, 238, 700, 54],
-#    [3, 236, 241, 696, 54],
-#    [4, 189, 184, 717, 55],
-#    [4, 159, 173, 682, 58],
-#]
+#70 / 30
+aliceSettings = [
+    [3, 230, 238, 700, 54],
+    [3, 236, 241, 696, 54],
+    [4, 189, 184, 717, 55],
+    [4, 159, 173, 682, 58],
+]
+aliceSettings = [
+    [3, 232, 238, 700, 54],
+    [3, 238, 241, 696, 54],
+    [4, 188, 184, 717, 55],
+    [4, 159, 173, 682, 53],
+]
 symbol_map = {k: v["ch"] for k, v in channels.items() if k != "CLK"}
 inv_symbol_map = {v: k for k, v in symbol_map.items()}
 
@@ -107,7 +113,7 @@ inv_state_map = {v: k for k, v in state_map.items()}
 
 filter = 1.32 / 100
 bob_eff = filter * 25.3852 / 100
-alice_trans = 0.917
+alice_trans = 0.917 / 0.9954
 rep_rate = 100E6
 chan_offset = [2000, 2071, -4515, 3070, 2000]
 dt = 10000
@@ -174,7 +180,7 @@ def guess_key(bins):
         key.append(val)
         qbers.append(qber)
 
-    return np.array(key), np.array(qbers), np.array(num_sifted_det)
+    return key, np.array(qbers), np.array(num_sifted_det)
 
 
 def find_filter(phases, height=0.8):
@@ -205,16 +211,15 @@ def find_filter(phases, height=0.8):
     ])
 
 
-def evaluate_tags(
-    data,
-    channels,
-    offsets,
-    sent_key=None,
-    key_length=None,
-    sync_offset=None,
-    filters=None,
-    verbose=True,
-):
+def evaluate_tags(data,
+                  channels,
+                  offsets,
+                  sent_key=None,
+                  key_length=1,
+                  sync_offset=None,
+                  filters=None,
+                  verbose=True,
+                  time_filtering=True):
     sync_data = data[1][data[0] == channels["SYNC"]["ch"]]
     sync_phase = 0
     #sync_offset = 6
@@ -245,6 +250,9 @@ def evaluate_tags(
     else:
         t0 = data[1][1]
         meas_time = (data[1][-1] - t0) * 1E-12
+        data[1] -= t0
+        data = data[:, data[1] >= 0]
+        sync_phase = 0
 
     if verbose:
         print("Got {:.2e} Events in {:.0f}s".format(len(data[0]), meas_time))
@@ -258,8 +266,15 @@ def evaluate_tags(
             offsets += shifts + sync_phase
         except:
             print("Unable to find peaks")
-            offsets += sync_phase
-            filters = [0, dt]
+            offsets = np.array(offsets) + sync_phase
+            filters = np.array([0, dt, 0, dt])
+
+    if not time_filtering:
+        filters = np.array([0, dt, 0, dt])
+
+    if verbose:
+        print("Offsets: ".format(offsets))
+
     for i in range(0, 5):
         data[1, data[0] == i + 1] += offsets[i] - sync_phase
 
@@ -267,6 +282,7 @@ def evaluate_tags(
 
     phases = np.vstack(
         (data % dt, ((data[1] % (dt * key_length)) / dt).astype(int)))
+
     time_mask = np.logical_or(
         np.logical_and(phases[1] >= filters[0], phases[1] <= filters[1]),
         data[0] == channels["SYNC"]["ch"])
@@ -295,10 +311,27 @@ def evaluate_tags(
 
                 print("Keys match with {}/{} symbols, most likely offset: {}".
                       format(matching_symbols, key_length, sync_offset))
-    used_key = np.array(key_guess)
+
+    used_key = key_guess
     if sent_key is not None and sync_offset is not None:
-        sent_key = (sent_key + sent_key)[sync_offset:sync_offset + key_length]
-        used_key = np.array(sent_key)
+        used_key = sent_key
+        used_key = np.array(
+            (used_key + used_key)[sync_offset:sync_offset + key_length])
+
+    mcount = [[], [], [], [], [], [], [], []]
+    if False:
+        for i, b in enumerate(bins):
+            if used_key[i] != key_guess[i]:
+                print("*", end="")
+            if num_sifted_det[i] <= np.mean(num_sifted_det) / 2:
+                print("#", end="")
+            print(inv_state_map[used_key[i]], inv_state_map[key_guess[i]], b,
+                  "{:.2f}".format(qbers[i] * 100), num_sifted_det[i])
+            mcount[used_key[i]].append(b.sum())
+        for c in mcount:
+            print(np.mean(c), np.std(c))
+        for c in mcount:
+            print(c)
 
     phases[2] = used_key[phases[2]]
 
@@ -314,8 +347,8 @@ def evaluate_tags(
     mus = []
     for pol in range(8):
         pol_bin = bins[used_key == pol, :]
-        mu = pol_bin.sum() / meas_time / bob_eff / rep_rate / (
-            len(pol_bin) / key_length) * alice_trans
+        mu = pol_bin.sum(axis=1) / meas_time / bob_eff / rep_rate / (
+            1 / key_length) * alice_trans
         mus.append(mu)
 
     return [
@@ -372,7 +405,7 @@ class WorkerSignals(QObject):
     new_phase_data = pyqtSignal(object)
     new_mu_data = pyqtSignal(object)
     new_measurement_data = pyqtSignal(int)
-    new_settings_applied = pyqtSignal()
+    new_settings_applied = pyqtSignal(object)
 
 
 class Worker(QRunnable):
@@ -439,10 +472,14 @@ class LinePlotter(Worker):
                 self.ydata = self.ydata[1:]
             self.xdata.append(self.frame)
             self.ydata.append([
-                mus[self.nr],
-                np.mean([mu for i, mu in enumerate(mus[:4]) if i != self.nr]),
-                mus[self.nr + 4],
-                np.mean([mu for i, mu in enumerate(mus[4:]) if i != self.nr])
+                np.mean(mus[self.nr]),
+                np.mean([
+                    np.mean(mu) for i, mu in enumerate(mus[:4]) if i != self.nr
+                ]),
+                np.mean(mus[self.nr + 4]),
+                np.mean([
+                    np.mean(mu) for i, mu in enumerate(mus[4:]) if i != self.nr
+                ])
             ])
             ax.plot(self.xdata,
                     self.ydata,
@@ -454,8 +491,10 @@ class LinePlotter(Worker):
                       linestyles="dashed",
                       colors="gray")
 
-            ax.set_title("$\\mu={:.2f}$\t$\\nu={:.2f}$".format(
-                self.ydata[-1][0], self.ydata[-1][2]))
+            ax.set_title(
+                "$\\mu={:.2f} \\pm {:.2f}$\t$\\nu={:.2f} \\pm {:.2f}$".format(
+                    np.mean(mus[self.nr]), np.std(mus[self.nr]),
+                    np.mean(mus[self.nr + 4]), np.std(mus[self.nr + 4])))
 
             ax.set_xlabel("Frame")
             ax.set_ylabel("Mean photon number")
@@ -591,6 +630,9 @@ class Experimentor(Worker):
         self.alice = AliceLmu("t14s", aliceSettings=aliceSettings)
         self.alice.turn_off()
         self.alice.turn_on(set=0)
+        self.signals.new_settings_applied.emit()
+
+    def send_key(self):
         self.alice.send_key(self.key_file)
         self.signals.new_settings_applied.emit()
 
@@ -690,6 +732,7 @@ class Evaluator(Worker):
         self.key_match = "No Key"
         self.has_new_data = False
         self.frame = 0
+        self.time_filtering = True
         if self.key_file != "":
             self.get_key()
 
@@ -706,76 +749,88 @@ class Evaluator(Worker):
             for char in file.readline()[:-1]:
                 self.sent_key.append(state_map[char])
 
-    def reset_Evaluation(self):
+    def reset_Evaluation(self, settings):
+        time_filtering, = settings
         print("Resetting evaluation")
+        self.mutex.lock()
         self.offsets = chan_offset
         self.sync_offset = None
         self.verbose = True
-        print(self.sync_offset, self.verbose)
+        self.time_filtering = time_filtering
+        self.mutex.unlock()
 
     def loop(self, i):
 
         if self.has_new_data:
-            frame = self.frame
-            print("Evaluating Frame {}".format(frame))
-            start = time.time()
-            data = self.data.copy()
-            self.has_new_data = False
-            self.frame += 1
+            self.mutex.lock()
+            try:
+                frame = self.frame
+                print("Evaluating Frame {}".format(frame))
+                start = time.time()
+                data = self.data.copy()
+                self.has_new_data = False
+                self.frame += 1
 
-            if len(data[0]) <= 0:
-                print("No Timestamps in frame")
-                return
-            data = get_valid_frames(data, verbose=False)
-            if len(data) <= 0:
-                print("No Sync detected in frame")
-                return
-            et = evaluate_tags(data,
-                               channels,
-                               self.offsets,
-                               sync_offset=self.sync_offset,
-                               sent_key=self.sent_key,
-                               verbose=self.verbose)
-            if len(et) == 0:
-                print("Evaluation error, continue")
-                return
-            phases, self.offsets, self.filters, self.sync_offset = et[:4]
-            print(self.offsets)
-            qbers, num_sifted_det, meas_time, t0 = et[4:8]
-            sifted_events, mus, key_match = et[8:]
-            if key_match is not None:
-                self.key_match = key_match
+                if len(data[0]) <= 0:
+                    print("No Timestamps in frame")
+                    return
+                valid_data = get_valid_frames(data, verbose=False)
+                if len(valid_data) <= 0:
+                    print("No Sync detected in frame")
+                    if self.sync_offset is None:
+                        valid_data = data
+                    else:
+                        return
+                et = evaluate_tags(valid_data,
+                                   channels,
+                                   self.offsets,
+                                   sync_offset=self.sync_offset,
+                                   sent_key=self.sent_key,
+                                   verbose=self.verbose,
+                                   time_filtering=self.time_filtering)
+                if len(et) == 0:
+                    print("Evaluation error, continue")
+                    return
+                phases, self.offsets, self.filters, self.sync_offset = et[:4]
+                print(self.offsets)
+                qbers, num_sifted_det, meas_time, t0 = et[4:8]
+                sifted_events, mus, key_match = et[8:]
+                if key_match is not None:
+                    self.key_match = key_match
 
-            self.verbose = False
-            nmax = []
-            hists = []
-            bins = []
-            phases_pol = phases[:, phases[0] != 5]
-            for pol in range(8):
-                hist, bins = np.histogram(phases_pol[1, phases_pol[2] == pol],
+                self.verbose = False
+                nmax = []
+                hists = []
+                bins = []
+                phases_pol = phases[:, phases[0] != 5]
+                for pol in range(8):
+                    hist, bins = np.histogram(phases_pol[1,
+                                                         phases_pol[2] == pol],
+                                              bins=100,
+                                              range=[0, dt])
+                    hists.append(hist)
+                    nmax.append(np.max(hist))
+                hist, bins = np.histogram(phases[1, phases[0] == 5],
                                           bins=100,
                                           range=[0, dt])
                 hists.append(hist)
                 nmax.append(np.max(hist))
-            hist, bins = np.histogram(phases[1, phases[0] == 5],
-                                      bins=100,
-                                      range=[0, dt])
-            hists.append(hist)
-            nmax.append(np.max(hist))
 
-            hists[-1] = hists[-1] * (np.mean(nmax[:-1]) / nmax[-1])
-            self.signals.new_phase_data.emit([hists, bins, self.filters])
-            self.signals.new_mu_data.emit([mus])
-            self.signals.new_stat_data.emit([
-                "{}".format(self.frame), "{:.2f}% ± {:.2f}%".format(
-                    np.mean(qbers) * 100,
-                    np.std(qbers) * 100), "{:.2f}Kbit/s".format(
-                        np.sum(num_sifted_det) / meas_time / 1000),
-                "{:.0f}".format(self.sync_offset), self.key_match
-            ])
-            duration = time.time() - start
+                hists[-1] = hists[-1] * (np.mean(nmax[:-1]) / nmax[-1])
+                self.signals.new_phase_data.emit([hists, bins, self.filters])
+                self.signals.new_mu_data.emit([mus])
+                self.signals.new_stat_data.emit([
+                    "{}".format(self.frame), "{:.2f}% ± {:.2f}%".format(
+                        np.mean(qbers) * 100,
+                        np.std(qbers) * 100), "{:.2f}Kbit/s".format(
+                            np.sum(num_sifted_det) / meas_time / 1000),
+                    "{:.0f}".format(self.sync_offset), self.key_match
+                ])
+                duration = time.time() - start
 
-            print("eval took {:.2f}s".format(duration))
+                print("eval took {:.2f}s".format(duration))
+            finally:
+                self.mutex.unlock()
 
     def evaluate_new_data(self, frame):
         measurement_data_mutex.lock()
@@ -807,7 +862,6 @@ class Gui(QWidget):
         self.aliceSettingsSpinBoxes = []
         self.settingsTimer = QTimer()
         self.settingsTimer.setSingleShot(True)
-        #self.settingsTimer.timeout.connect(self.updateSettings)
         self.settings_changed_signal.connect(self.saveSettings)
         self.frame = 0
         self.mode = mode
@@ -818,15 +872,10 @@ class Gui(QWidget):
         for i in range(8):
             self.canvases.append(MplCanvas(self, width=4, height=5, dpi=100))
 
-        # Buttons:
-        self.btn_start = QPushButton('Start')
-        self.btn_stop = QPushButton('Stop')
-        self.btn_open = QPushButton('Open')
-        self.btn_set = QPushButton('Set Alice')
-        self.btn_set.clicked.connect(self.updateSettings)
-
-        self.check_save_raw = QCheckBox("Save raw Data")
-        self.check_save_sifted = QCheckBox("Save sifted Data")
+        # Buttons:        self.btn_open = QPushButton('Open')
+        self.btn_set_Alice = QPushButton('Set Alice')
+        self.btn_set_Alice.clicked.connect(self.updateSettings)
+        self.btn_set_Key = QPushButton('Set Key')
 
         # Alice settings
 
@@ -834,18 +883,38 @@ class Gui(QWidget):
         self.setGeometry(300, 300, 300, 220)
         self.setWindowTitle('ThreadTest')
         self.layout = QGridLayout()
-        self.layout.addWidget(self.btn_start, 0, 0)
-        self.layout.addWidget(self.btn_stop, 0, 1)
+
+        self.btn_start = QPushButton('Start')
+        self.btn_stop = QPushButton('Stop')
+        self.btn_open = QPushButton('Open')
+
+        self.btn_widget = QWidget()
+        self.btn_layout = QHBoxLayout()
+        self.btn_layout.addWidget(self.btn_start)
+        self.btn_layout.addWidget(self.btn_stop)
+        self.btn_layout.addWidget(self.btn_open)
+        self.btn_widget.setLayout(self.btn_layout)
+        self.layout.addWidget(self.btn_widget, 0, 0)
+
+        self.check_save_raw = QCheckBox("Save raw Data")
+        self.check_save_sifted = QCheckBox("Save sifted Data")
+        self.check_time_filter = QCheckBox("Time Filtering", checked=True)
 
         self.cb_widget = QWidget()
         self.cb_layout = QHBoxLayout()
+        self.cb_layout.addWidget(self.check_time_filter)
         self.cb_layout.addWidget(self.check_save_raw)
         self.cb_layout.addWidget(self.check_save_sifted)
         self.cb_widget.setLayout(self.cb_layout)
-
         self.layout.addWidget(self.cb_widget, 0, 2)
 
-        self.layout.addWidget(self.btn_set, 0, 3)
+        self.set_widget = QWidget()
+        self.set_layout = QHBoxLayout()
+        self.set_layout.addWidget(self.btn_set_Key)
+        self.set_layout.addWidget(self.btn_set_Alice)
+        self.set_widget.setLayout(self.set_layout)
+        self.layout.addWidget(self.set_widget, 0, 3)
+
         #self.layout.addWidget(self.btn_open, 1, 3)
         for i in range(4):
             laserGroup = QGroupBox("{} Polarization".format(inv_state_map[i]))
@@ -869,7 +938,7 @@ class Gui(QWidget):
                 else:
                     settingsSpinBox.setRange(0, 1023 - aliceSettings[i][j - 1])
                 settingsSpinBox.setValue(aliceSettings[i][j])
-                if self.mode == 0:
+                if False:  #self.mode == 0:
                     settingsSpinBox.setEnabled(False)
                 else:
                     settingsSpinBox.valueChanged.connect(self.settingsChanged)
@@ -969,6 +1038,7 @@ class Gui(QWidget):
         self.pause_signal.connect(experimentor.pause)
         self.start_signal.connect(experimentor.resume)
         self.settings_changed_signal.connect(experimentor.reset_Measurement)
+        self.btn_set_Key.clicked.connect(experimentor.send_key)
         evaluator = Evaluator(self.folder, self.key_file)
         self.threadpool.start(evaluator)
         self.stop_signal.connect(evaluator.kill)
@@ -983,6 +1053,9 @@ class Gui(QWidget):
             evaluator.evaluate_new_data)
         experimentor.signals.new_settings_applied.connect(
             evaluator.reset_Evaluation)
+        self.check_time_filter.stateChanged.connect(
+            lambda: evaluator.reset_Evaluation(
+                [self.check_time_filter.isChecked()]))
         for i in range(4):
             plotter = PhasePlotter(self.canvases[i], i)
             evaluator.signals.new_phase_data.connect(plotter.plot_new_data)
