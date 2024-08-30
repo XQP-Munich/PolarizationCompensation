@@ -100,10 +100,10 @@ aliceSettings = [
     [4, 159, 173, 682, 58],
 ]
 aliceSettings = [
-    [3, 232, 238, 700, 54],
-    [3, 238, 241, 696, 54],
+    [3, 245, 238, 700, 54],
+    [3, 236, 241, 696, 54],
     [4, 188, 184, 717, 55],
-    [4, 159, 173, 682, 53],
+    [4, 171, 173, 682, 53],
 ]
 symbol_map = {k: v["ch"] for k, v in channels.items() if k != "CLK"}
 inv_symbol_map = {v: k for k, v in symbol_map.items()}
@@ -180,7 +180,7 @@ def guess_key(bins):
         key.append(val)
         qbers.append(qber)
 
-    return key, np.array(qbers), np.array(num_sifted_det)
+    return np.array(key), np.array(qbers), np.array(num_sifted_det)
 
 
 def find_filter(phases, height=0.8):
@@ -216,7 +216,7 @@ def evaluate_tags(data,
                   offsets,
                   sent_key=None,
                   key_length=1,
-                  sync_offset=None,
+                  sync_offset=np.nan,
                   filters=None,
                   verbose=True,
                   time_filtering=True):
@@ -301,7 +301,7 @@ def evaluate_tags(data,
 
     key_guess, qbers, num_sifted_det = guess_key(bins)
     keymatch = None
-    if sent_key is not None and sync_offset is None:
+    if sent_key is not None and np.isnan(sync_offset):
         matching_symbols, sync_offset = compare_key(sent_key, key_guess)
         if verbose:
             if (matching_symbols == key_length):
@@ -311,20 +311,24 @@ def evaluate_tags(data,
 
                 print("Keys match with {}/{} symbols, most likely offset: {}".
                       format(matching_symbols, key_length, sync_offset))
+                if matching_symbols <= key_length*0.75:
+                    sync_offset=np.nan
 
     used_key = key_guess
-    if sent_key is not None and sync_offset is not None:
+    if sent_key is not None and not np.isnan(sync_offset):
         used_key = sent_key
         used_key = np.array(
             (used_key + used_key)[sync_offset:sync_offset + key_length])
 
     mcount = [[], [], [], [], [], [], [], []]
-    if False:
+    if True:
         for i, b in enumerate(bins):
             if used_key[i] != key_guess[i]:
                 print("*", end="")
-            if num_sifted_det[i] <= np.mean(num_sifted_det) / 2:
+            if b.sum() <= np.mean(np.sum(bins,axis=1)) / 2:
                 print("#", end="")
+            if b.sum() >= np.mean(np.sum(bins,axis=1)) * 2:
+                print("%", end="")
             print(inv_state_map[used_key[i]], inv_state_map[key_guess[i]], b,
                   "{:.2f}".format(qbers[i] * 100), num_sifted_det[i])
             mcount[used_key[i]].append(b.sum())
@@ -332,8 +336,10 @@ def evaluate_tags(data,
             print(np.mean(c), np.std(c))
         for c in mcount:
             print(c)
-
-    phases[2] = used_key[phases[2]]
+    if sent_key is not None and not np.isnan(sync_offset):
+        phases[2] = used_key[phases[2]]
+    else:
+        phases[2] = phases[0]
 
     if verbose:
         print("Mean Qber: {:.2f}% with std of {:.4f}".format(
@@ -405,7 +411,7 @@ class WorkerSignals(QObject):
     new_phase_data = pyqtSignal(object)
     new_mu_data = pyqtSignal(object)
     new_measurement_data = pyqtSignal(int)
-    new_settings_applied = pyqtSignal(object)
+    new_settings_applied = pyqtSignal()
 
 
 class Worker(QRunnable):
@@ -599,9 +605,9 @@ class Experimentor(Worker):
         self.stoped = False
         self.reset = False
         self.stream = None
+        self.host="t14s"
         if self.mode == 0:
             self.initPlayback()
-            self.alice = AliceLmu("t14s")
         else:
             self.initMeasurement()
 
@@ -609,7 +615,7 @@ class Experimentor(Worker):
         self.get_data_files()
 
     def initMeasurement(self):
-        self.alice = AliceLmu()
+        self.alice = AliceLmu(self.host)
         self.timestamp = TimeTaggerUltra(channels)
 
     def reset_Measurement(self, settings):
@@ -627,7 +633,7 @@ class Experimentor(Worker):
             pol = pol[:-1] + [pol[-2] + pol[-1]]
             aliceSettings[0][pols[i]] = pol
         print(aliceSettings)
-        self.alice = AliceLmu("t14s", aliceSettings=aliceSettings)
+        self.alice = AliceLmu(self.host, aliceSettings=aliceSettings)
         self.alice.turn_off()
         self.alice.turn_on(set=0)
         self.signals.new_settings_applied.emit()
@@ -727,7 +733,7 @@ class Evaluator(Worker):
         self.key_file = key_file
         self.loop_playback = True
         self.sent_key = None
-        self.sync_offset = None
+        self.sync_offset = np.nan
         self.verbose = True
         self.key_match = "No Key"
         self.has_new_data = False
@@ -749,14 +755,16 @@ class Evaluator(Worker):
             for char in file.readline()[:-1]:
                 self.sent_key.append(state_map[char])
 
-    def reset_Evaluation(self, settings):
-        time_filtering, = settings
+    def reset_Evaluation(self, settings=None):
         print("Resetting evaluation")
         self.mutex.lock()
         self.offsets = chan_offset
-        self.sync_offset = None
+        self.sync_offset = np.nan
         self.verbose = True
-        self.time_filtering = time_filtering
+        if settings is not None:
+            time_filtering, = settings
+            self.time_filtering = time_filtering
+
         self.mutex.unlock()
 
     def loop(self, i):
@@ -777,9 +785,10 @@ class Evaluator(Worker):
                 valid_data = get_valid_frames(data, verbose=False)
                 if len(valid_data) <= 0:
                     print("No Sync detected in frame")
-                    if self.sync_offset is None:
+                    if np.isnan(self.sync_offset):
                         valid_data = data
                     else:
+                        print("Skipping Frame")
                         return
                 et = evaluate_tags(valid_data,
                                    channels,
@@ -798,7 +807,7 @@ class Evaluator(Worker):
                 if key_match is not None:
                     self.key_match = key_match
 
-                self.verbose = False
+                #self.verbose = False
                 nmax = []
                 hists = []
                 bins = []
