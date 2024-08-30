@@ -22,7 +22,7 @@ class TimeTaggerUltra(TIMESTAMP):
             if key == "CLK":
                 self.tt.setEventDivider(channels[key]["ch"], 1)
                 self.tt.setSoftwareClock(channels[key]["ch"], 10_000_000)
-
+        self.clock_errors = 0
         time.sleep(1)
 
     def read(self, t):
@@ -31,8 +31,7 @@ class TimeTaggerUltra(TIMESTAMP):
         try_count = 0
         while True:
             try_count += 1
-            self.stream = TimeTagger.TimeTagStream(self.tt, 1E9,
-                                                   self.channels_measure)
+            self.stream = self.get_stream()
             self.stream.startFor(t * 1E12)
             print("Measuring the next {}s".format(t))
             self.stream.waitUntilFinished()
@@ -47,6 +46,15 @@ class TimeTaggerUltra(TIMESTAMP):
             time.sleep(5)
             if try_count == 5:
                 Exception("To many clock erros")
+
+    def get_stream(self):
+        import TimeTagger
+        return TimeTagger.TimeTagStream(self.tt, 1E9, self.channels_measure)
+
+    def get_clock_errors(self):
+        scs = self.tt.getSoftwareClockState()
+        self.clock_errors = scs.error_counter - self.clock_errors
+        return self.clock_errors
 
     def stop(self):
         self.stream.stop()
