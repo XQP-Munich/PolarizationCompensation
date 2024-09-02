@@ -22,6 +22,7 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QVBoxLayout,
     QHBoxLayout,
+    QLineEdit,
     QTextEdit,
 )
 from PyQt5.QtCore import (
@@ -42,6 +43,7 @@ from PyQt5.QtGui import (
 
 from Devices.TimeTaggerUltra import TimeTaggerUltra
 from Devices.AliceLmu import AliceLmu
+from led_widget import LedIndicator
 
 matplotlib.use('QtAgg')
 
@@ -121,20 +123,30 @@ def save_ts(ts, path):
     data.tofile(path)
 
 
+import random
+
+
 def save_sifted(sifted, path):
     print("saving {} events".format(len(sifted[0])))
     pol = []
     for chan in sifted[0]:
         if chan == 1:
             pol.append("H")
+            #pol.append("P")
         if chan == 2:
             pol.append("V")
+            #pol.append("M")
         if chan == 3:
             pol.append("P")
+            #pol.append("H")
         if chan == 4:
             pol.append("M")
+            #pol.append("V")
     with open(path, "w") as f:
         for i in range(len(sifted[1])):
+            #if pol[i] == "P" or pol[i] == "M":
+            #    if random.random() > 0.42857:
+            #        continue
             f.writelines("{} {}\n".format(pol[i], sifted[1][i]))
 
 
@@ -441,32 +453,25 @@ def get_valid_frames(data, verbose=True):
     sync_dropouts = np.where(
         np.logical_or(sync_diffs > (sync_diffs_median + valid_timing),
                       sync_diffs < (sync_diffs_median - valid_timing)))[0]
-    if len(sync_dropouts) > 0 and verbose:
+    if len(sync_dropouts) > 1 and verbose:
         print("{} SYNC dropouts detected:\n{}".format(
             len(sync_dropouts), sync_indices[sync_dropouts]))
     sync_dropouts = np.concatenate(([-1], sync_dropouts))
-    print(sync_dropouts, len(sync_dropouts))
     valid_frames = []
     for i in range(len(sync_dropouts) - 1):
         beg = sync_indices[sync_dropouts[i] + 1]
         end = sync_indices[sync_dropouts[i + 1]]
-        d = data[:, beg:end + 1]
-        valid_frames.append(d)
-    if len(sync_dropouts) == 0:
-        valid_frames = [data]
+        if end > beg:
+            d = data[:, beg:end + 1]
+            valid_frames.append(d)
     return np.concatenate(valid_frames, axis=1)
 
 
 def compare_key(sent_key, detected_key):
-    temp_key = sent_key + sent_key
     sames = []
     for i in range(len(sent_key)):
-        comp_key = temp_key[i:i + len(sent_key)]
-        same = 0
-        for j in range(len(sent_key)):
-            if (detected_key[j] == comp_key[j] % 4):
-                same += 1
-        sames.append(same)
+        sames.append(
+            np.count_nonzero(detected_key == np.roll(sent_key, -i) % 4))
     return max(sames), np.argmax(sames)
 
 
@@ -842,6 +847,23 @@ class Gui(QWidget):
         self.btn_widget.setLayout(self.btn_layout)
         self.gridlayout.addWidget(self.btn_widget, 0, 0)
 
+        self.set_widget = QWidget()
+        self.set_layout = QHBoxLayout()
+        self.set_widget.setLayout(self.set_layout)
+
+        self.host_widget = QWidget()
+        self.host_layout = QVBoxLayout()
+        self.host_widget.setLayout(self.host_layout)
+        self.host_label = QLabel("Alice Host")
+        self.host_text = QLineEdit("local")
+        self.host_text.setMaximumWidth(10)
+        self.host_layout.addWidget(self.host_label)
+        self.host_layout.addWidget(self.host_text)
+
+        self.set_layout.addWidget(self.host_widget)
+
+        #self.gridlayout.addWidget(self.set_widget, 0, 1)
+
         self.check_save_raw = QCheckBox("Save raw Data")
         self.check_save_raw.stateChanged.connect(self.updateEvaluationSettings)
         self.check_save_sifted = QCheckBox("Save sifted Data")
@@ -952,7 +974,8 @@ class Gui(QWidget):
     def updateStats(self, data):
         self.frame = int(data[0])
         for text, data in zip(self.statTexts, data):
-            text.setText(data)
+            if data is not None:
+                text.setText(data)
 
     def saveSettings(self, settings):
         with open(self.folder + "aliceSettings.csv", "a") as f:

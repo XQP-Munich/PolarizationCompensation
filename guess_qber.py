@@ -9,8 +9,8 @@ import matplotlib
 import time
 from PIL import Image
 import gc
-from PolarizationCompensation.Devices.TimeTaggerUltra import TimeTaggerUltra, TimeTaggerUltraVirtual
-from PolarizationCompensation.Devices.AliceLmu import AliceLmu
+from Devices.TimeTaggerUltra import TimeTaggerUltra, TimeTaggerUltraVirtual
+from Devices.AliceLmu import AliceLmu
 
 #matplotlib.use("qt5agg")
 print(plt.get_backend())
@@ -487,11 +487,12 @@ def main():
     rd[1] -= rd[1][0]
     end = int(rd[1][-1] * 1E-12)
     #datas = [
-    #    rd[:, np.logical_and(rd[1] > (i) * 1E12, rd[1] < (i + 1) * 1E12)]
-    #    for i in range(2)
+    #    rd[:,
+    #       np.logical_and(rd[1] > (i * 4) * 1E12, rd[1] < (4 * (i + 1)) *
+    #                      1E12)] for i in range(end // 4)
     #]
     #for i, data in enumerate(datas):
-    #    save_ts(data, "frame{}.bin".format(i))
+    #    save_ts(data, "raw_frame{}.bin".format(i))
     datas = [rd]
     offsets = chan_offset
     fig, ax = plt.subplots(figsize=(5, 3), dpi=400)
@@ -514,7 +515,7 @@ def main():
                 print("No Sync detected in frame")
                 continue
             offsets, filters, plot_data, sifted_events = evaluate_tags(
-                data, channels, offsets, verbose=False)
+                data, channels, offsets, verbose=True)
             start3 = time.time()
             print("Evaluate took: {:.2f}".format(start3 - start2))
 
