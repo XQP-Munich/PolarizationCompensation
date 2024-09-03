@@ -102,23 +102,22 @@ aliceSettings = [
 #    [4, 173, 187, 682, 54],
 #]
 
-aliceSettingsFile="aliceConfig.toml"
+aliceSettingsFile = "aliceConfig.toml"
 if os.path.isfile(aliceSettingsFile):
-    with open(aliceSettingsFile,"r") as f:
+    with open(aliceSettingsFile, "r") as f:
         aliceSettingsContent = f.read()
     aliceSettingsContent = toml.loads(aliceSettingsContent)
-    settings=["bias","modSig","modDec","delayA","delayB"]
-    aliceSettings=[]
-    for i in range(1,5):
+    settings = ["bias", "modSig", "modDec", "delayA", "delayB"]
+    aliceSettings = []
+    for i in range(1, 5):
         t = aliceSettingsContent["laserConfig"]["channel{}".format(i)]
         chan_settings = []
         for setting in settings:
             if setting == "delayB":
-                chan_settings.append(t[setting]-chan_settings[-1])
+                chan_settings.append(t[setting] - chan_settings[-1])
             else:
                 chan_settings.append(t[setting])
         aliceSettings.append(chan_settings)
-
 
 symbol_map = {k: v["ch"] for k, v in channels.items() if k != "CLK"}
 inv_symbol_map = {v: k for k, v in symbol_map.items()}
@@ -672,6 +671,10 @@ class Experimentor(Worker):
             for char in file.readline()[:-1]:
                 self.sent_key.append(state_map[char])
 
+    def set_meas_time(self, time):
+        print("Setting measurement time to {}s".format(time))
+        self.meas_time = time
+
     def initPlayback(self):
         self.data_files = []
         self.get_data_files()
@@ -734,9 +737,9 @@ class Experimentor(Worker):
                     np.int64)
                 self.time_last = time.time()
         else:
-            if self.reset or (self.stream.getCaptureDuration(
-            ) * 1E-12 - self.lastmeas) >= self.meas_time:
-                self.lastmeas = self.stream.getCaptureDuration()*1E-12
+            if self.reset or (self.stream.getCaptureDuration() * 1E-12 -
+                              self.lastmeas) >= self.meas_time:
+                self.lastmeas = self.stream.getCaptureDuration() * 1E-12
                 print("Measured Frame {}".format(self.frame))
                 data = self.stream.getData()
                 data = np.array([data.getChannels(), data.getTimestamps()])
@@ -871,18 +874,17 @@ class Gui(QWidget):
         self.set_layout = QHBoxLayout()
         self.set_widget.setLayout(self.set_layout)
 
-        self.host_widget = QWidget()
-        self.host_layout = QVBoxLayout()
-        self.host_widget.setLayout(self.host_layout)
-        self.host_label = QLabel("Alice Host")
-        self.host_text = QLineEdit("local")
-        self.host_text.setMaximumWidth(10)
-        self.host_layout.addWidget(self.host_label)
-        self.host_layout.addWidget(self.host_text)
+        measLabel = QLabel("Measurement Time")
+        measLabel.setAlignment(Qt.AlignCenter)
+        self.measSpinBox = QSpinBox()
+        self.measSpinBox.setAlignment(Qt.AlignCenter)
+        self.measSpinBox.setRange(1, 60 * 60)
+        self.measSpinBox.setValue(5)
+        self.measSpinBox.valueChanged.connect(self.settingsChanged)
+        self.set_layout.addWidget(measLabel)
+        self.set_layout.addWidget(self.measSpinBox)
 
-        self.set_layout.addWidget(self.host_widget)
-
-        #self.gridlayout.addWidget(self.set_widget, 0, 1)
+        self.gridlayout.addWidget(self.set_widget, 0, 1)
 
         self.check_save_raw = QCheckBox("Save raw Data")
         self.check_save_raw.stateChanged.connect(self.updateEvaluationSettings)
@@ -1044,6 +1046,8 @@ class Gui(QWidget):
         self.start_signal.connect(experimentor.resume)
         self.btn_set_Key.clicked.connect(experimentor.send_key)
         self.alice_settings_set_signal.connect(experimentor.set_aliceSettings)
+        self.measSpinBox.valueChanged.connect(
+            lambda: experimentor.set_meas_time(self.measSpinBox.value()))
         self.eval_settings_changed_signal.connect(
             experimentor.update_eval_settings)
         experimentor.signals.new_stat_data.connect(self.updateStats)
