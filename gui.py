@@ -9,7 +9,7 @@ import matplotlib
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import concurrent.futures
-
+import toml
 from PyQt5.QtWidgets import (
     QWidget,
     QPushButton,
@@ -43,7 +43,6 @@ from PyQt5.QtGui import (
 
 from Devices.TimeTaggerUltra import TimeTaggerUltra
 from Devices.AliceLmu import AliceLmu
-from led_widget import LedIndicator
 
 matplotlib.use('QtAgg')
 
@@ -83,25 +82,44 @@ channels = {
 }
 # 50/50
 aliceSettings = [
-    [3, 230, 233, 700, 54],
-    [3, 231, 235, 696, 54],
-    [4, 190, 186, 717, 55],
-    [4, 163, 176, 682, 59],
+    [3, 235, 238, 700, 54],
+    [4, 199, 202, 696, 54],
+    [4, 195, 186, 717, 55],
+    [4, 163, 177, 682, 54],
 ]
 # 70 / 30
-aliceSettings = [
-    [3, 230, 238, 700, 54],
-    [3, 236, 241, 696, 54],
-    [4, 189, 184, 717, 55],
-    [4, 159, 173, 682, 58],
-]
+#aliceSettings = [
+#    [3, 230, 238, 700, 54],
+#    [3, 236, 241, 696, 54],
+#    [4, 189, 184, 717, 55],
+#    [4, 159, 173, 682, 58],
+#]
 # new
-aliceSettings = [
-    [3, 245, 238, 700, 54],
-    [3, 236, 241, 696, 54],
-    [4, 188, 184, 717, 55],
-    [4, 171, 173, 682, 53],
-]
+#aliceSettings = [
+#    [3, 251, 238, 700, 55],
+#    [4, 197, 198, 696, 54],
+#    [4, 188, 184, 717, 55],
+#    [4, 173, 187, 682, 54],
+#]
+
+aliceSettingsFile="aliceConfig.toml"
+if os.path.isfile(aliceSettingsFile):
+    with open(aliceSettingsFile,"r") as f:
+        aliceSettingsContent = f.read()
+    aliceSettingsContent = toml.loads(aliceSettingsContent)
+    settings=["bias","modSig","modDec","delayA","delayB"]
+    aliceSettings=[]
+    for i in range(1,5):
+        t = aliceSettingsContent["laserConfig"]["channel{}".format(i)]
+        chan_settings = []
+        for setting in settings:
+            if setting == "delayB":
+                chan_settings.append(t[setting]-chan_settings[-1])
+            else:
+                chan_settings.append(t[setting])
+        aliceSettings.append(chan_settings)
+
+
 symbol_map = {k: v["ch"] for k, v in channels.items() if k != "CLK"}
 inv_symbol_map = {v: k for k, v in symbol_map.items()}
 
@@ -297,7 +315,7 @@ def evaluate_tags(data,
     data = data[:, time_mask]
 
     sifted_events = data[:, data[0] != 5]
-    sifted_events[1] = sifted_events[1] // dt
+    sifted_events[1] = (sifted_events[1]) // dt
 
     bins = np.zeros((key_length, 4))
     pos_in_key = ((data[1] % (dt * key_length)) / dt).astype(int)
@@ -538,7 +556,7 @@ def plot_mus(canvas, plot_data):
     if canvas.xdata is None:
         canvas.xdata = []
         canvas.ydata = []
-    if len(canvas.xdata) >= 10:
+    if len(canvas.xdata) >= 30:
         canvas.xdata = canvas.xdata[1:]
         canvas.ydata = canvas.ydata[1:]
     canvas.xdata.append(frame)
@@ -634,6 +652,7 @@ class Experimentor(Worker):
         self.reset = False
 
         self.meas_time = 5
+        self.lastmeas = 0
 
         self.frame = 0
         self.last_plotted_frame = -1
@@ -673,7 +692,7 @@ class Experimentor(Worker):
             aliceSettings[0][pols[i]] = pol
         print(aliceSettings)
         self.alice = AliceLmu(self.host, aliceSettings=aliceSettings)
-        self.alice.turn_off()
+        #self.alice.turn_off()
         self.alice.turn_on(set=0)
         self.reset = True
         self.reset_eval_settings()
@@ -715,11 +734,12 @@ class Experimentor(Worker):
                     np.int64)
                 self.time_last = time.time()
         else:
-            if self.reset or self.stream.getCaptureDuration(
-            ) * 1E-12 >= self.meas_time:
+            if self.reset or (self.stream.getCaptureDuration(
+            ) * 1E-12 - self.lastmeas) >= self.meas_time:
+                self.lastmeas = self.stream.getCaptureDuration()*1E-12
                 print("Measured Frame {}".format(self.frame))
                 data = self.stream.getData()
-                data = [data.getChannels(), data.getTimestamps()]
+                data = np.array([data.getChannels(), data.getTimestamps()])
                 clock_errors = self.timestamp.get_clock_errors()
                 if clock_errors != 0:
                     print("{} Clock errors detected".format(clock_errors))
@@ -1005,6 +1025,7 @@ class Gui(QWidget):
 
     def setAliceSettings(self):
         self.alice_settings_set_signal.emit(self.aliceSettings)
+        self.saveSettings(self.aliceSettings)
 
     def updateEvaluationSettings(self):
         self.eval_settings_changed_signal.emit([

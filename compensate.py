@@ -45,9 +45,9 @@ send_pol = ["H", "P"]
 waveplate_setup = ["QWP", "HWP", "QWP"]
 aliceSettings = {1:{
     "H": [15, 0, 0, 100, 175],
-    "V": [10, 0, 0, 100, 175],
-    "P": [10, 0, 0, 100, 175],
-    "M": [10, 0, 0, 100, 172]
+    "V": [15, 0, 0, 100, 175],
+    "P": [15, 0, 0, 100, 175],
+    "M": [15, 0, 0, 100, 172]
 }}
 
 if __name__ == "__main__":
@@ -105,3 +105,5 @@ if __name__ == "__main__":
     if not folder_exists:
         print("Moving waveplats to compensation angle")
         waveplates.move_to(angles)
+    for i in ["H","V","P","M"]:
+        source.turn_on(i)

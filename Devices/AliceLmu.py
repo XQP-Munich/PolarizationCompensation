@@ -31,31 +31,34 @@ randomFile = "/dev/urandom"
 
 [laserConfig.channel1]
 bias = {}
+modSig = {}
+modDec = {}
 delayA = {}
 delayB = {}
-modDec = {}
-modSig = {}
 
 [laserConfig.channel2]
 bias = {}
+modSig = {}
+modDec = {}
 delayA = {}
 delayB = {}
-modDec = {}
-modSig = {}
+
 
 [laserConfig.channel3]
 bias = {}
+modSig = {}
+modDec = {}
 delayA = {}
 delayB = {}
-modDec = {}
-modSig = {}
+
 
 [laserConfig.channel4]
 bias = {}
+modSig = {}
+modDec = {}
 delayA = {}
 delayB = {}
-modDec = {}
-modSig = {}
+
 
 
 #TCP Configuration
