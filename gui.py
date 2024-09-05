@@ -126,10 +126,11 @@ state_map = {"H": 0, "V": 1, "P": 2, "M": 3, "h": 4, "v": 5, "p": 6, "m": 7}
 inv_state_map = {v: k for k, v in state_map.items()}
 
 filter = 1.32 / 100
+filter = 0.0001 #40dBloss
 bob_eff = filter * 25.3852 / 100
 alice_trans = 0.917 / 0.9954
 rep_rate = 100E6
-chan_offset = [2000, 2071, -4515, 3070, 2000]
+chan_offset = [12000, 12071, 10000-4515, 13070, 12000]
 dt = 10000
 meas_time = 0
 key_length = 0
@@ -207,7 +208,7 @@ def guess_key(bins):
     return np.array(key), np.array(qbers), np.array(num_sifted_det)
 
 
-def find_filter(phases, height=0.8):
+def find_filter(phases, height=0.9):
     bin_width = 1000
     filter_min = []
     filter_max = []
@@ -250,7 +251,7 @@ def evaluate_tags(data,
     if sent_key is not None:
         key_length = len(sent_key)
     if sync_data.size != 0:
-        key_length_sync = int(np.rint(np.mean(np.diff(sync_data)) / dt))
+        key_length_sync = int(np.rint(np.median(np.diff(sync_data)) / dt))
         if key_length is not None and key_length_sync != key_length:
             print("Target key length {} does not match detected key length {}".
                   format(key_length, key_length_sync))
@@ -327,6 +328,7 @@ def evaluate_tags(data,
     key_guess, qbers, num_sifted_det = guess_key(bins)
     keymatch = None
     if sent_key is not None and np.isnan(sync_offset):
+        print("Trying to f")
         matching_symbols, sync_offset = compare_key(sent_key, key_guess)
         if verbose:
             if (matching_symbols == key_length):
@@ -336,7 +338,7 @@ def evaluate_tags(data,
 
                 print("Keys match with {}/{} symbols, most likely offset: {}".
                       format(matching_symbols, key_length, sync_offset))
-                if matching_symbols <= key_length * 0.50:
+                if matching_symbols <= key_length * 0.25:
                     sync_offset = np.nan
 
     used_key = key_guess
@@ -467,19 +469,26 @@ def get_valid_frames(data, verbose=True):
         return []
     sync_diffs = np.diff(data[1][sync_indices], append=0)
     sync_diffs_median = np.median(sync_diffs)
+    #sync_diffs_median = 4096*10E-9
+    print(sync_diffs_median)
     sync_dropouts = np.where(
         np.logical_or(sync_diffs > (sync_diffs_median + valid_timing),
                       sync_diffs < (sync_diffs_median - valid_timing)))[0]
-    if len(sync_dropouts) > 1 and verbose:
+    if len(sync_dropouts) > 1:
         print("{} SYNC dropouts detected:\n{}".format(
             len(sync_dropouts), sync_indices[sync_dropouts]))
     sync_dropouts = np.concatenate(([-1], sync_dropouts))
     valid_frames = []
+    last_valid_sync = 0
     for i in range(len(sync_dropouts) - 1):
         beg = sync_indices[sync_dropouts[i] + 1]
         end = sync_indices[sync_dropouts[i + 1]]
         if end > beg:
             d = data[:, beg:end + 1]
+            #print(d)
+            d[1] -= d[1,0] - last_valid_sync - np.int64(sync_diffs_median)
+            #print(d)
+            last_valid_sync = d[1,-1]
             valid_frames.append(d)
     return np.concatenate(valid_frames, axis=1)
 
