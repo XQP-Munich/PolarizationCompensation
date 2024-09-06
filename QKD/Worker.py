@@ -2,6 +2,7 @@ import time
 import os
 import numpy as np
 import concurrent.futures
+import socket
 
 from PyQt5.QtCore import (
     QReadWriteLock,
@@ -10,6 +11,7 @@ from PyQt5.QtCore import (
     pyqtSignal,
     QRunnable,
     pyqtSlot,
+    QThreadPool,
 )
 
 from QKD.Evaluation import process_data
@@ -276,3 +278,83 @@ class Experimentor(Worker):
         self.eval_lock.lockForWrite()
         self.last_plotted_frame = frame
         self.eval_lock.unlock()
+
+
+class Connection(Worker):
+
+    def __init__(self, sock, address, parent=None):
+        Worker.__init__(self)
+        print("New Connection from: {}".format(address))
+        self.sock = sock
+        self.address = address
+        self.parent = parent
+
+    def loop(self, i):
+        print(i)
+        try:
+            data = self.sock.recv(32)
+            if len(data) == 0:
+                raise Exception()
+        except Exception as e:
+            print(e)
+            print("Client " + str(self.address) + " has disconnected")
+            if self.parent != None:
+                self.parent.connected = False
+            self.kill()
+            return
+        if data != "":
+            print(str(data.decode("utf-8")))
+
+
+class Server(Worker):
+
+    def __init__(self, host="localhost", port=31415):
+        Worker.__init__(self)
+        self.host = host
+        self.port = port
+        self.threadpool = QThreadPool.globalInstance()
+        self.start_server()
+
+    def start_server(self):
+        print("Starting server on: {}:{}".format(self.host, self.port))
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind((self.host, self.port))
+        self.sock.listen(1)
+
+    def loop(self, i):
+        try:
+            sock, address = self.sock.accept()
+            conn = Connection(sock, address)
+            self.threadpool.start(conn)
+        except Exception as e:
+            print(e)
+
+
+class Client(Worker):
+
+    def __init__(self, host="localhost", port=31415):
+        Worker.__init__(self)
+        self.host = host
+        self.port = port
+        self.connected = False
+        self.threadpool = QThreadPool.globalInstance()
+
+    def connect(self):
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.connect((self.host, self.port))
+            self.conn = Connection(self.sock, "client", parent=self)
+            self.threadpool.start(self.conn)
+            self.connected = True
+        except:
+            self.connected = False
+            print("Could not make a connection to the server")
+
+    def loop(self, i):
+        if not self.connected:
+            self.connect()
+        else:
+            print(i)
+            if i % 4 == 0:
+                self.sock.send("{}".format(i).encode())
