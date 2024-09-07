@@ -5,6 +5,7 @@ import concurrent.futures
 import socket
 
 from PyQt5.QtCore import (
+    QMutex,
     QReadWriteLock,
     QThread,
     QObject,
@@ -12,8 +13,9 @@ from PyQt5.QtCore import (
     QRunnable,
     pyqtSlot,
     QThreadPool,
+    QTimer,
 )
-
+from PyQt5.QtTest import QSignalSpy
 from QKD.Evaluation import process_data
 from QKD.Plotting import plot_phases, plot_mus
 
@@ -51,16 +53,19 @@ def load_ts(path):
 
 
 class WorkerSignals(QObject):
-    new_stat_data = pyqtSignal(object)
-
-
-class Worker(QRunnable):
-
-    signals = WorkerSignals()
+    new_data = pyqtSignal(object)
+    conn_closed = pyqtSignal(object)
 
     def __init__(self):
         super().__init__()
 
+
+class Worker(QRunnable):
+
+    def __init__(self):
+        super().__init__()
+
+        self.signals = WorkerSignals()
         self.is_paused = False
         self.is_running = True
 
@@ -98,7 +103,7 @@ class Experimentor(Worker):
                  alice=None,
                  timestamp=None,
                  key_file=""):
-        Worker.__init__(self)
+        super().__init__()
         # Experimentor vars
         self.mode = mode
         self.folder = folder
@@ -274,79 +279,196 @@ class Experimentor(Worker):
                 self.futures.append(future)
 
             self.offsets, self.sync_offset = eval_data
-            self.signals.new_stat_data.emit(ui_data)
+            self.signals.new_data.emit(ui_data)
         self.eval_lock.lockForWrite()
         self.last_plotted_frame = frame
         self.eval_lock.unlock()
 
 
+from io import BytesIO
+import struct
+
+buffsize = 8
+
+
 class Connection(Worker):
 
-    def __init__(self, sock, address, parent=None):
-        Worker.__init__(self)
+    def __init__(self, sock, address, nr=0, parent=None):
+        super().__init__()
         print("New Connection from: {}".format(address))
         self.sock = sock
+        self.sock.settimeout(1)
         self.address = address
         self.parent = parent
+        self.nr = nr
 
-    def loop(self, i):
-        print(i)
+    def receive(self):
         try:
-            data = self.sock.recv(32)
-            if len(data) == 0:
+            data = self.recv_msg()
+            if data is None:
                 raise Exception()
+            try:
+                data = data.decode("utf-8")
+            except:
+                data = np.load(BytesIO(data), allow_pickle=True)
+            self.signals.new_data.emit((self.nr, data))
+        except socket.timeout:
+            return
         except Exception as e:
             print(e)
             print("Client " + str(self.address) + " has disconnected")
-            if self.parent != None:
-                self.parent.connected = False
+            self.signals.conn_closed.emit(self.nr)
             self.kill()
             return
-        if data != "":
-            print(str(data.decode("utf-8")))
+
+    def send(self, message):
+        np_bytes = BytesIO()
+        np.save(np_bytes, message, allow_pickle=True)
+        self.send_msg(np_bytes.getvalue())
+
+    def send_msg(self, msg):
+        # Prefix each message with a 4-byte length (network byte order)
+        msg = struct.pack('>Q', len(msg)) + msg
+        self.sock.sendall(msg)
+
+    def recv_msg(self):
+        # Read message length and unpack it into an integer
+        raw_msglen = self.recvall(8)
+        if not raw_msglen:
+            return None
+        msglen = struct.unpack('>Q', raw_msglen)[0]
+        # Read the message data
+        return self.recvall(msglen)
+
+    def recvall(self, n):
+        # Helper function to recv n bytes or return None if EOF is hit
+        data = bytearray()
+        while len(data) < n:
+            packet = self.sock.recv(n - len(data))
+            if not packet:
+                return None
+            data.extend(packet)
+        return data
+
+    def loop(self, i):
+        self.receive()
 
 
 class Server(Worker):
 
     def __init__(self, host="localhost", port=31415):
-        Worker.__init__(self)
+        super().__init__()
         self.host = host
         self.port = port
-        self.threadpool = QThreadPool.globalInstance()
         self.start_server()
+        self.conn_nr = 0
 
     def start_server(self):
-        print("Starting server on: {}:{}".format(self.host, self.port))
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind((self.host, self.port))
-        self.sock.listen(1)
-
-    def loop(self, i):
         try:
-            sock, address = self.sock.accept()
-            conn = Connection(sock, address)
-            self.threadpool.start(conn)
+            print("Starting server on: {}:{}".format(self.host, self.port))
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.sock.bind((self.host, self.port))
+            self.sock.listen(10)
+            self.sock.settimeout(1)
         except Exception as e:
             print(e)
+
+    def accept(self):
+        try:
+            sock, address = self.sock.accept()
+            conn = Connection(sock, address, nr=self.conn_nr)
+            self.signals.new_data.emit(conn)
+            self.conn_nr += 1
+        except socket.timeout:
+            return
+        except Exception as e:
+            print(e)
+
+    def loop(self, i):
+        self.accept()
+
+
+class Bob_Server(QObject):
+
+    def __init__(self, host="localhost", port=31415):
+        super().__init__()
+        self.server = Server(host, port)
+        self.server.signals.new_data.connect(self.new_conn_handler)
+        self.threadpool = QThreadPool.globalInstance()
+        self.threadpool.start(self.server)
+        self.conns = {}
+        self.conns_mutex = QMutex()
+        self.alice_conn_nr = None
+
+    def new_conn_handler(self, conn):
+        conn.signals.new_data.connect(self.handle_hello)
+        conn.signals.conn_closed.connect(self.handle_close)
+        self.add_conn(conn)
+        self.threadpool.start(conn)
+
+    @pyqtSlot(object)
+    def handle_hello(self, message):
+        conn_nr, msg = message
+        if msg == "alice":
+            print("Alice says Hello")
+            if self.alice_conn_nr == None:
+                self.alice_conn_nr = conn_nr
+                self.conns[conn_nr].signals.new_data.disconnect(
+                    self.handle_hello)
+                self.conns[conn_nr].signals.new_data.connect(self.handle_alice)
+                return
+        print("Hello: {} invalid".format(msg))
+        self.conns[conn_nr].kill()
+
+    @pyqtSlot(object)
+    def handle_close(self, conn_nr):
+        print("Con {} closed".format(conn_nr))
+        self.conns[conn_nr].kill()
+        self.remove_conn(self.conns[conn_nr])
+        if self.alice_conn_nr == conn_nr:
+            self.alice_conn_nr = None
+
+    @pyqtSlot(object)
+    def handle_alice(self, message):
+        conn_nr, msg = message
+        print("Con: {}: Alice: {}".format(conn_nr, msg))
+
+    def send_alice(self, message):
+        if self.alice_conn_nr is not None:
+            self.conns[self.alice_conn_nr].send(message)
+
+    def kill(self):
+        for conn in self.conns:
+            self.conns[conn].kill()
+        self.server.kill()
+
+    def add_conn(self, conn):
+        self.conns_mutex.lock()
+        self.conns[conn.nr] = conn
+        self.conns_mutex.unlock()
+
+    def remove_conn(self, conn):
+        self.conns_mutex.lock()
+        self.conns.pop(conn.nr)
+        self.conns_mutex.unlock()
 
 
 class Client(Worker):
 
     def __init__(self, host="localhost", port=31415):
-        Worker.__init__(self)
+        super().__init__()
         self.host = host
         self.port = port
         self.connected = False
-        self.threadpool = QThreadPool.globalInstance()
 
     def connect(self):
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.sock.connect((self.host, self.port))
-            self.conn = Connection(self.sock, "client", parent=self)
-            self.threadpool.start(self.conn)
+            conn = Connection(self.sock, "client", nr=0)
             self.connected = True
+            self.signals.new_data.emit(conn)
         except:
             self.connected = False
             print("Could not make a connection to the server")
@@ -355,6 +477,49 @@ class Client(Worker):
         if not self.connected:
             self.connect()
         else:
-            print(i)
-            if i % 4 == 0:
-                self.sock.send("{}".format(i).encode())
+            time.sleep(0.1)
+
+
+class Alice_Client(QObject):
+
+    def __init__(self, host="localhost", port=31415):
+        super().__init__()
+        try:
+            self.client = Client(host, port)
+            self.client.signals.new_data.connect(self.new_conn_handler)
+            self.spy = QSignalSpy(self.client.signals.new_data)
+            self.name = "alice"
+            self.conn = None
+            self.threadpool = QThreadPool.globalInstance()
+            self.threadpool.start(self.client)
+        except Exception as e:
+            print(e)
+
+    @pyqtSlot(object)
+    def new_conn_handler(self, conn):
+        conn.signals.new_data.connect(self.handle_message)
+        conn.signals.conn_closed.connect(self.handle_close)
+        self.conn = conn
+        self.conn.send(self.name)
+        self.threadpool.start(conn)
+
+    @pyqtSlot(object)
+    def handle_close(self, conn_nr):
+        print("Con {} closed".format(conn_nr))
+        self.conn = None
+        self.client.connected = False
+
+    def kill(self):
+        print("kill alice")
+        print(self.conn)
+        if self.conn is not None:
+            self.conn.kill()
+        self.client.kill()
+
+    def send(self, message):
+        if self.conn is not None:
+            self.conn.send(message)
+
+    def handle_message(self, message):
+        conn_nr, msg = message
+        print("{}: {}".format(conn_nr, msg))

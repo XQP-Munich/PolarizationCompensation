@@ -1,7 +1,7 @@
-from QKD.Worker import Alice_Client, Client
+from QKD.Worker import Bob_Server, Server
 import time
-
 import sys
+import numpy as np
 from PyQt5.QtWidgets import (
     QRadioButton,
     QWidget,
@@ -39,9 +39,17 @@ class Gui(QWidget):
 
     def __init__(self, *args, **kwargs):
         super(Gui, self).__init__(*args, **kwargs)
-        self.client = Alice_Client()
-        button = QPushButton("write to server")
-        button.clicked.connect(lambda: self.client.send("boks"))
+        self.server = Bob_Server()
+        button = QPushButton("write to alice")
+        test = np.array([
+            [3, 235, 238, 700, 54],
+            [4, 199, 202, 696, 54],
+            [4, 195, 186, 717, 55],
+            [4, 163, 177, 682, 54],
+        ])
+        test = np.linspace(0, 100, int(1E8))
+        print("Sending {}GB".format(test.itemsize * test.size / 1E9))
+        button.clicked.connect(lambda: self.server.send_alice(test))
         layout = QVBoxLayout()
         layout.addWidget(button)
         self.setLayout(layout)
@@ -55,5 +63,5 @@ if __name__ == '__main__':
     try:
         a = app.exec_()
     finally:
-        gui.client.kill()
-        sys.exit()
+        gui.server.kill()
+        sys.exit(a)

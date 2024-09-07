@@ -439,7 +439,7 @@ class Gui(QWidget):
             lambda: experimentor.set_meas_time(self.measSpinBox.value()))
         self.eval_settings_changed_signal.connect(
             experimentor.update_eval_settings)
-        experimentor.signals.new_stat_data.connect(self.updateStats)
+        experimentor.signals.new_data.connect(self.updateStats)
 
     def getfile(self):
         fname = QFileDialog.getOpenFileName(self, 'Open file', './', "*")
