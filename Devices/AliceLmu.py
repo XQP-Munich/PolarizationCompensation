@@ -86,6 +86,9 @@ class AliceLmu(SOURCE):
                 }
             }
 
+    def set_aliceSettings(self, settings):
+        self.aliceSettings = settings
+
     def turn_on(self, pol=None, set=1):
         if pol:
             print("Turn on pol: {}".format(pol))

@@ -53,8 +53,9 @@ class TimeTaggerUltra(TIMESTAMP):
 
     def get_clock_errors(self):
         scs = self.tt.getSoftwareClockState()
-        self.clock_errors = scs.error_counter - self.clock_errors
-        return self.clock_errors
+        clock_errors = scs.error_counter - self.clock_errors
+        self.clock_errors = scs.error_counter
+        return clock_errors
 
     def stop(self):
         self.stream.stop()

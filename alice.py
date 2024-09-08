@@ -33,6 +33,7 @@ from PyQt5.QtCore import (
     QMutex,
     QTimer,
 )
+import numpy as np
 
 
 class Gui(QWidget):
@@ -44,8 +45,22 @@ class Gui(QWidget):
         button.clicked.connect(lambda: self.client.send("boks"))
         layout = QVBoxLayout()
         layout.addWidget(button)
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.timeout)
+        self.timer.start(1000)
         self.setLayout(layout)
         self.show()
+        self.i = 0
+
+    def timeout(self):
+        print("Timer run out")
+        if self.i >= 20:
+            self.client.send([time.time(), 0.4])
+        else:
+            self.client.send([time.time(), 0.8])
+        if self.i >= 40:
+            self.i = 0
+        self.i += 1
 
 
 if __name__ == '__main__':

@@ -3,6 +3,8 @@ import os
 import numpy as np
 import concurrent.futures
 import socket
+from io import BytesIO
+import struct
 
 from PyQt5.QtCore import (
     QMutex,
@@ -17,7 +19,7 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtTest import QSignalSpy
 from QKD.Evaluation import process_data
-from QKD.Plotting import plot_phases, plot_mus
+from QKD.Plotting import plot_phases, plot_mus, plot_floss, plot_lloss
 
 chan_offset = [12000, 12071, 10000 - 4515, 13070, 12000]  # todo remove global
 
@@ -137,6 +139,12 @@ class Experimentor(Worker):
         self.executor = concurrent.futures.ThreadPoolExecutor()
         self.futures = []
 
+        self.floss = -25.1
+        self.fmu = 0.33
+
+        self.alice_mu_data = []
+
+        self.plot_mode = 0
         if self.mode == 0:
             self.initPlayback()
         else:
@@ -170,7 +178,7 @@ class Experimentor(Worker):
             pol = pol[:-1] + [pol[-2] + pol[-1]]
             aliceSettings[0][pols[i]] = pol
         print(aliceSettings)
-        self.alice.set_Settings(aliceSettings=aliceSettings)
+        self.alice.set_aliceSettings(aliceSettings=aliceSettings)
         #self.alice.turn_off()
         self.alice.turn_on(set=0)
         self.reset = True
@@ -186,6 +194,22 @@ class Experimentor(Worker):
         self.sync_offset = np.nan
         self.verbose = True
 
+    def handle_settings_change(self, settings):
+        reprate, alice_loss, bob_loss, plot_mu, plot_floss, plot_lloss, fmu, floss = settings
+        if plot_mu:
+            self.plot_mode = 0
+        elif plot_floss:
+            self.plot_mode = 1
+        elif plot_lloss:
+            self.plot_mode = 2
+        self.reprate = reprate
+        self.alice_loss = alice_loss
+        self.bob_loss = bob_loss
+        self.fmu = fmu
+        self.floss = floss
+        for canv in self.canvases:
+            canv.resetData()
+
     def update_eval_settings(self, settings):
         if settings is not None:
             self.time_filtering, self.save_raw, self.save_sifted = settings
@@ -195,6 +219,9 @@ class Experimentor(Worker):
             if f.endswith(".bin"):
                 self.data_files.append(f)
         print(self.data_files)
+
+    def handle_alice_counts(self, counts):
+        self.alice_mu_data.append(counts)
 
     def loop(self, i):
         data = None
@@ -224,15 +251,18 @@ class Experimentor(Worker):
                     print("{} Clock errors detected".format(clock_errors))
 
         if data is not None and not self.reset:
-            future = self.executor.submit(process_data,
-                                          data,
-                                          self.frame,
-                                          self.channels,
-                                          offsets=self.offsets,
-                                          sync_offset=self.sync_offset,
-                                          sent_key=self.sent_key,
-                                          time_filtering=self.time_filtering,
-                                          verbose=True)
+            future = self.executor.submit(
+                process_data,
+                data,
+                self.frame,
+                self.channels,
+                offsets=self.offsets,
+                sync_offset=self.sync_offset,
+                sent_key=self.sent_key,
+                time_filtering=self.time_filtering,
+                verbose=True,
+                tm=time.time(),
+            )
             future.add_done_callback(self.eval_done)
             self.futures.append(future)
             if self.save_raw:
@@ -262,15 +292,38 @@ class Experimentor(Worker):
             self.eval_lock.unlock()
 
         if res is not None:
-            eval_data, phase_data, mu_data, ui_data, sifted_events = res
+            eval_data, phase_data, click_data, ui_data, sifted_events = res
 
             for i in range(4):
                 future = self.executor.submit(plot_phases, self.canvases[i],
                                               phase_data)
                 self.futures.append(future)
             for i in range(4):
-                future = self.executor.submit(plot_mus, self.canvases[i + 4],
-                                              mu_data)
+                if self.plot_mode == 0:
+                    future = self.executor.submit(plot_mus,
+                                                  self.canvases[i + 4],
+                                                  click_data,
+                                                  self.floss,
+                                                  rep_rate=self.reprate,
+                                                  alice_loss=self.alice_loss,
+                                                  bob_loss=self.bob_loss)
+                elif self.plot_mode == 1:
+                    future = self.executor.submit(plot_floss,
+                                                  self.canvases[i + 4],
+                                                  click_data,
+                                                  self.fmu,
+                                                  rep_rate=self.reprate,
+                                                  alice_loss=self.alice_loss,
+                                                  bob_loss=self.bob_loss)
+                elif self.plot_mode == 2:
+                    future = self.executor.submit(plot_lloss,
+                                                  self.canvases[i + 4],
+                                                  click_data,
+                                                  self.alice_mu_data,
+                                                  rep_rate=self.reprate,
+                                                  alice_loss=self.alice_loss,
+                                                  bob_loss=self.bob_loss)
+
                 self.futures.append(future)
             if self.save_sifted:
                 future = self.executor.submit(
@@ -283,12 +336,6 @@ class Experimentor(Worker):
         self.eval_lock.lockForWrite()
         self.last_plotted_frame = frame
         self.eval_lock.unlock()
-
-
-from io import BytesIO
-import struct
-
-buffsize = 8
 
 
 class Connection(Worker):
@@ -390,6 +437,8 @@ class Server(Worker):
 
 
 class Bob_Server(QObject):
+    alice_connected = pyqtSignal(bool)
+    alice_new_data = pyqtSignal(object)
 
     def __init__(self, host="localhost", port=31415):
         super().__init__()
@@ -417,6 +466,7 @@ class Bob_Server(QObject):
                 self.conns[conn_nr].signals.new_data.disconnect(
                     self.handle_hello)
                 self.conns[conn_nr].signals.new_data.connect(self.handle_alice)
+                self.alice_connected.emit(True)
                 return
         print("Hello: {} invalid".format(msg))
         self.conns[conn_nr].kill()
@@ -428,11 +478,13 @@ class Bob_Server(QObject):
         self.remove_conn(self.conns[conn_nr])
         if self.alice_conn_nr == conn_nr:
             self.alice_conn_nr = None
+            self.alice_connected.emit(False)
 
     @pyqtSlot(object)
     def handle_alice(self, message):
         conn_nr, msg = message
-        print("Con: {}: Alice: {}".format(conn_nr, msg))
+        #print("Con: {}: Alice: {}".format(conn_nr, msg))
+        self.alice_new_data.emit(msg)
 
     def send_alice(self, message):
         if self.alice_conn_nr is not None:

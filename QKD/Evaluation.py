@@ -47,7 +47,7 @@ def guess_key(bins):
     return np.array(key), np.array(qbers), np.array(num_sifted_det)
 
 
-def find_filter(phases, height=0.9):
+def find_filter(phases, height=1):
     bin_width = 1000
     filter_min = []
     filter_max = []
@@ -151,7 +151,11 @@ def evaluate_tags(data,
     time_mask = np.logical_or(
         np.logical_and(phases[1] >= filters[0], phases[1] <= filters[1]),
         data[0] == channels["SYNC"]["ch"])
+    #datan = data[:, ~time_mask]
     data = data[:, time_mask]
+    #print("S/N: {}".format(
+    #    len(data[1, data[0] != channels["SYNC"]["ch"]]) /
+    #    len(datan[1, datan[0] != channels["SYNC"]["ch"]])))
 
     sifted_events = data[:, data[0] != 5]
     sifted_events[1] = (sifted_events[1]) // dt
@@ -216,16 +220,13 @@ def evaluate_tags(data,
         print("Sifted key Rate: {:.2f}".format(
             np.sum(num_sifted_det) / meas_time))
 
-    mus = []
+    pol_clicks = []
     for pol in range(8):
         pol_bin = bins[used_key == pol, :]
-        mu = pol_bin.sum(axis=1) / meas_time / bob_eff / rep_rate / (
-            1 / key_length) * alice_trans
-        mus.append(mu)
-
+        pol_clicks.append(pol_bin.sum(axis=1))
     return [
         phases, offsets, filters, sync_offset, qbers, num_sifted_det,
-        meas_time, t0 * 1E-12, sifted_events, mus, keymatch
+        meas_time, t0 * 1E-12, sifted_events, pol_clicks, keymatch
     ]
 
 
@@ -236,7 +237,8 @@ def process_data(data,
                  sync_offset=np.nan,
                  sent_key=None,
                  verbose=True,
-                 time_filtering=True):
+                 time_filtering=True,
+                 tm=0):
     print("Evaluating Frame {}".format(frame))
     start = time.time()
 
@@ -263,7 +265,7 @@ def process_data(data,
         return frame, None
     phases, offsets, filters, sync_offset = et[:4]
     qbers, num_sifted_det, meas_time, t0 = et[4:8]
-    sifted_events, mus, key_match = et[8:]
+    sifted_events, pol_clicks, key_match = et[8:]
 
     #self.verbose = False
     nmax = []
@@ -284,7 +286,7 @@ def process_data(data,
 
     hists[-1] = hists[-1] * (np.max(nmax[:-1]) / nmax[-1])
     phase_data = [hists, bins, filters]
-    mu_data = [frame, mus]
+    cps_data = [frame, pol_clicks, meas_time, tm]
     ui_data = [
         "{}".format(frame),
         "{:.2f}% ± {:.2f}%".format(np.mean(qbers) * 100,
@@ -298,7 +300,7 @@ def process_data(data,
     duration = time.time() - start
 
     print("eval took {:.2f}s".format(duration))
-    return frame, [eval_data, phase_data, mu_data, ui_data, sifted_events]
+    return frame, [eval_data, phase_data, cps_data, ui_data, sifted_events]
 
 
 def get_valid_frames(data, channels, verbose=True):

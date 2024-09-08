@@ -60,8 +60,20 @@ def plot_phases(canvas, plot_data):
     return True
 
 
-def plot_mus(canvas, plot_data):
-    frame, mus, = plot_data
+def plot_mus(canvas,
+             plot_data,
+             loss,
+             rep_rate=100E6,
+             alice_loss=0,
+             bob_loss=0):
+    frame, clicks, meas_time, tm = plot_data
+    key_length = sum(len(x) for x in clicks)
+    mus = []
+    for i in range(len(clicks)):
+        mus.append(clicks[i] / meas_time / rep_rate / (1 / key_length) /
+                   (10**(bob_loss / 10)) / (10**(loss / 10)) *
+                   (10**(alice_loss / 10)))
+
     ax = canvas.axes
     ax.cla()
     start = time.time()
@@ -96,5 +108,99 @@ def plot_mus(canvas, plot_data):
     ax.set_ylabel("Mean photon number")
     canvas.fig.tight_layout()
     print("mu plot took {:.2f}s".format(time.time() - start))
+    canvas.draw()
+    return True
+
+
+def plot_floss(canvas,
+               plot_data,
+               mu,
+               rep_rate=100E6,
+               alice_loss=0,
+               bob_loss=0):
+    frame, clicks, meas_time, tm = plot_data
+    expected_cps = rep_rate * mu * (10**(bob_loss / 10))
+
+    key_length = sum(len(x) for x in clicks)
+    chan_clicks = []
+    for i in range(4):
+        chan_clicks.append(np.mean(np.concatenate((clicks[i], clicks[i + 4]))))
+    chan_cps = np.array(chan_clicks) / meas_time * key_length
+
+    loss = np.log10(chan_cps / expected_cps) * 10
+
+    ax = canvas.axes
+    ax.cla()
+    start = time.time()
+    if canvas.xdata is None:
+        canvas.xdata = []
+        canvas.ydata = []
+    if len(canvas.xdata) >= 30:
+        canvas.xdata = canvas.xdata[1:]
+        canvas.ydata = canvas.ydata[1:]
+    canvas.xdata.append(frame)
+    canvas.ydata.append(loss[canvas.pol])
+    ax.plot(canvas.xdata, canvas.ydata, label="Loss")
+    ax.legend(loc="center left")
+
+    #ax.set_title("μ={:.2f}±{:.2f}  ν={:.2f}±{:.2f}".format(
+
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("Loss in dB")
+    canvas.fig.tight_layout()
+    print("loss plot took {:.2f}s".format(time.time() - start))
+    canvas.draw()
+    return True
+
+
+def plot_lloss(canvas,
+               plot_data,
+               lmu,
+               rep_rate=100E6,
+               alice_loss=0,
+               bob_loss=0):
+    frame, cps, meas_time, tm = plot_data
+    lmu = np.array(lmu).transpose()
+    if len(lmu) <= 0:
+        print("No Alice Data")
+        return
+    interv = (tm - meas_time, tm)
+    for t in interv:
+        if t < lmu[0][0] - 5 or t > lmu[0][-1] + 5:
+            print("{} is not in [{},{}]".format(t, lmu[0][0], lmu[0][-1]))
+            return
+    xs = np.arange(*interv, 1)
+    lmut = np.interp(xs, lmu[0], lmu[1])
+    mu = np.mean(lmut)
+    expected_cps = rep_rate * mu * (10**(bob_loss / 10))
+
+    key_length = sum(len(x) for x in cps)
+    chan_cps = []
+    for i in range(4):
+        chan_cps.append(np.mean(np.concatenate((cps[i], cps[i + 4]))))
+    chan_cps = np.array(chan_cps) * key_length
+
+    loss = np.log10(chan_cps / expected_cps) * 10
+
+    ax = canvas.axes
+    ax.cla()
+    start = time.time()
+    if canvas.xdata is None:
+        canvas.xdata = []
+        canvas.ydata = []
+    if len(canvas.xdata) >= 30:
+        canvas.xdata = canvas.xdata[1:]
+        canvas.ydata = canvas.ydata[1:]
+    canvas.xdata.append(frame)
+    canvas.ydata.append(loss[canvas.pol])
+    ax.plot(canvas.xdata, canvas.ydata, label="Loss")
+    ax.legend(loc="center left")
+
+    #ax.set_title("μ={:.2f}±{:.2f}  ν={:.2f}±{:.2f}".format(
+
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("Loss in dB")
+    canvas.fig.tight_layout()
+    print("loss plot took {:.2f}s".format(time.time() - start))
     canvas.draw()
     return True
