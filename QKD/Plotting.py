@@ -153,32 +153,99 @@ def plot_floss(canvas,
     return True
 
 
+def plot_qber(canvas, ui_data):
+    frame, qber, _, _, _, _ = ui_data
+    qber = np.mean(qber) * 100
+
+    ax = canvas.axes
+    ax.cla()
+    start = time.time()
+    if canvas.xdata is None:
+        canvas.xdata = []
+        canvas.ydata = []
+    if len(canvas.xdata) >= 30:
+        canvas.xdata = canvas.xdata[1:]
+        canvas.ydata = canvas.ydata[1:]
+    canvas.xdata.append(frame)
+    canvas.ydata.append(qber)
+    ax.plot(canvas.xdata,
+            canvas.ydata,
+            label="qber",
+            color="C{}".format(canvas.pol + 4))
+    ax.legend(loc="center left")
+
+    ax.set_title("QBER {:.2f}%".format(qber))
+
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("QBER in %")
+    canvas.fig.tight_layout()
+    print("qber plot took {:.2f}s".format(time.time() - start))
+    canvas.draw()
+    return True
+
+
+def plot_skr(canvas, ui_data):
+    frame, _, skr, _, _, _ = ui_data
+
+    ax = canvas.axes
+    ax.cla()
+    start = time.time()
+    if canvas.xdata is None:
+        canvas.xdata = []
+        canvas.ydata = []
+    if len(canvas.xdata) >= 30:
+        canvas.xdata = canvas.xdata[1:]
+        canvas.ydata = canvas.ydata[1:]
+    canvas.xdata.append(frame)
+    canvas.ydata.append(skr)
+    ax.plot(canvas.xdata,
+            canvas.ydata,
+            label="skr",
+            color="C{}".format(canvas.pol + 4))
+    ax.legend(loc="center left")
+
+    ax.set_title("Sifted Key Rate {:.2f}Kbit/s".format(skr))
+
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("Sifted Key Rate in Kbit/s")
+    canvas.fig.tight_layout()
+    print("skr plot took {:.2f}s".format(time.time() - start))
+    canvas.draw()
+    return True
+
+
 def plot_lloss(canvas,
                plot_data,
                lmu,
                rep_rate=100E6,
                alice_loss=0,
                bob_loss=0):
-    frame, cps, meas_time, tm = plot_data
+    frame, clicks, meas_time, tm = plot_data
     lmu = np.array(lmu).transpose()
     if len(lmu) <= 0:
         print("No Alice Data")
         return
     interv = (tm - meas_time, tm)
     for t in interv:
-        if t < lmu[0][0] - 5 or t > lmu[0][-1] + 5:
+        if t < lmu[0][0] - 10 or t > lmu[0][-1] + 10:
             print("{} is not in [{},{}]".format(t, lmu[0][0], lmu[0][-1]))
             return
     xs = np.arange(*interv, 1)
     lmut = np.interp(xs, lmu[0], lmu[1])
     mu = np.mean(lmut)
+    print(mu, 10**(bob_loss / 10))
     expected_cps = rep_rate * mu * (10**(bob_loss / 10))
 
-    key_length = sum(len(x) for x in cps)
-    chan_cps = []
+    pols_sent = [len(x) for x in clicks]
+    print(pols_sent)
+    chan_clicks = []
     for i in range(4):
-        chan_cps.append(np.mean(np.concatenate((cps[i], cps[i + 4]))))
-    chan_cps = np.array(chan_cps) * key_length
+        chan_clicks.append(
+            np.sum(np.concatenate((clicks[i], clicks[i + 4]))) /
+            (pols_sent[i] + pols_sent[i + 4]))
+    chan_cps = np.array(chan_clicks) / meas_time * np.sum(pols_sent)
+
+    print(chan_cps, expected_cps)
 
     loss = np.log10(chan_cps / expected_cps) * 10
 
@@ -192,15 +259,59 @@ def plot_lloss(canvas,
         canvas.xdata = canvas.xdata[1:]
         canvas.ydata = canvas.ydata[1:]
     canvas.xdata.append(frame)
-    canvas.ydata.append(loss[canvas.pol])
-    ax.plot(canvas.xdata, canvas.ydata, label="Loss")
+    canvas.ydata.append(loss)
+    ydat = np.transpose(canvas.ydata)
+    for i, pol in enumerate(["H", "V", "P", "M"]):
+        ax.plot(canvas.xdata, ydat[i], label=pol, color="C{}".format(i))
     ax.legend(loc="center left")
 
-    #ax.set_title("μ={:.2f}±{:.2f}  ν={:.2f}±{:.2f}".format(
+    ax.set_title("{:.2f}dB Channel loss".format(np.mean(loss)))
 
     ax.set_xlabel("Frame")
     ax.set_ylabel("Loss in dB")
     canvas.fig.tight_layout()
     print("loss plot took {:.2f}s".format(time.time() - start))
+    canvas.draw()
+    return True
+
+
+def plot_lmu(canvas, plot_data, lmu, rep_rate=100E6, alice_loss=0, bob_loss=0):
+    frame, cps, meas_time, tm = plot_data
+    lmu = np.array(lmu).transpose()
+    if len(lmu) <= 0:
+        print("No Alice Data")
+        return
+    interv = (tm - meas_time, tm)
+    for t in interv:
+        if t < lmu[0][0] - 10 or t > lmu[0][-1] + 10:
+            print("{} is not in [{},{}]".format(t, lmu[0][0], lmu[0][-1]))
+            return
+    xs = np.arange(*interv, 1)
+    lmut = np.interp(xs, lmu[0], lmu[1])
+    mu = np.mean(lmut)
+
+    ax = canvas.axes
+    ax.cla()
+    start = time.time()
+    if canvas.xdata is None:
+        canvas.xdata = []
+        canvas.ydata = []
+    if len(canvas.xdata) >= 30:
+        canvas.xdata = canvas.xdata[1:]
+        canvas.ydata = canvas.ydata[1:]
+    canvas.xdata.append(frame)
+    canvas.ydata.append(mu)
+    ax.plot(canvas.xdata,
+            canvas.ydata,
+            label="μ",
+            color="C{}".format(canvas.pol + 4))
+    ax.legend(loc="center left")
+
+    ax.set_title("Alice brightness μ={:.2f}".format(mu))
+
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("Mean photon Number")
+    canvas.fig.tight_layout()
+    print("lmu plot took {:.2f}s".format(time.time() - start))
     canvas.draw()
     return True

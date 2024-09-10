@@ -5,6 +5,7 @@ import concurrent.futures
 import socket
 from io import BytesIO
 import struct
+import re
 
 from PyQt5.QtCore import (
     QMutex,
@@ -19,12 +20,25 @@ from PyQt5.QtCore import (
 )
 from PyQt5.QtTest import QSignalSpy
 from QKD.Evaluation import process_data
-from QKD.Plotting import plot_phases, plot_mus, plot_floss, plot_lloss
+from QKD.Plotting import *
 
 chan_offset = [12000, 12071, 10000 - 4515, 13070, 12000]  # todo remove global
 
 state_map = {"H": 0, "V": 1, "P": 2, "M": 3, "h": 4, "v": 5, "p": 6, "m": 7}
 inv_state_map = {v: k for k, v in state_map.items()}
+
+
+def atoi(text):
+    return int(text) if text.isdigit() else text
+
+
+def natural_keys(text):
+    '''
+    alist.sort(key=natural_keys) sorts in human order
+    http://nedbatchelder.com/blog/200712/human_sorting.html
+    (See Toothy's implementation in the comments)
+    '''
+    return [atoi(c) for c in re.split(r'(\d+)', text)]
 
 
 def save_ts(ts, path):
@@ -141,7 +155,7 @@ class Experimentor(Worker):
 
         self.floss = -25.1
         self.fmu = 0.33
-
+        self.last_valid_sync = 0
         self.alice_mu_data = []
 
         self.plot_mode = 0
@@ -218,6 +232,7 @@ class Experimentor(Worker):
         for f in os.listdir(self.folder):
             if f.endswith(".bin"):
                 self.data_files.append(f)
+        self.data_files.sort(key=natural_keys)
         print(self.data_files)
 
     def handle_alice_counts(self, counts):
@@ -235,7 +250,8 @@ class Experimentor(Worker):
                         self.kill()
                         return
                     frame = self.frame
-                print("Reading Frame {}".format(frame))
+                print("Reading Frame {} from {}".format(
+                    frame, self.data_files[frame]))
                 data = load_ts(self.folder + self.data_files[frame]).view(
                     np.int64)
                 self.time_last = time.time()
@@ -262,6 +278,7 @@ class Experimentor(Worker):
                 time_filtering=self.time_filtering,
                 verbose=True,
                 tm=time.time(),
+                last_valid_sync=self.last_valid_sync,
             )
             future.add_done_callback(self.eval_done)
             self.futures.append(future)
@@ -298,6 +315,30 @@ class Experimentor(Worker):
                 future = self.executor.submit(plot_phases, self.canvases[i],
                                               phase_data)
                 self.futures.append(future)
+            if self.plot_mode == 2:
+                future = self.executor.submit(plot_lmu,
+                                              self.canvases[4],
+                                              click_data,
+                                              self.alice_mu_data,
+                                              rep_rate=self.reprate,
+                                              alice_loss=self.alice_loss,
+                                              bob_loss=self.bob_loss)
+                self.futures.append(future)
+                future = self.executor.submit(plot_lloss,
+                                              self.canvases[5],
+                                              click_data,
+                                              self.alice_mu_data,
+                                              rep_rate=self.reprate,
+                                              alice_loss=self.alice_loss,
+                                              bob_loss=self.bob_loss)
+                self.futures.append(future)
+                future = self.executor.submit(plot_qber, self.canvases[6],
+                                              ui_data)
+                self.futures.append(future)
+                future = self.executor.submit(plot_skr, self.canvases[7],
+                                              ui_data)
+                self.futures.append(future)
+
             for i in range(4):
                 if self.plot_mode == 0:
                     future = self.executor.submit(plot_mus,
@@ -315,14 +356,6 @@ class Experimentor(Worker):
                                                   rep_rate=self.reprate,
                                                   alice_loss=self.alice_loss,
                                                   bob_loss=self.bob_loss)
-                elif self.plot_mode == 2:
-                    future = self.executor.submit(plot_lloss,
-                                                  self.canvases[i + 4],
-                                                  click_data,
-                                                  self.alice_mu_data,
-                                                  rep_rate=self.reprate,
-                                                  alice_loss=self.alice_loss,
-                                                  bob_loss=self.bob_loss)
 
                 self.futures.append(future)
             if self.save_sifted:
@@ -331,7 +364,7 @@ class Experimentor(Worker):
                     self.folder + "sifted_frame{}.csv".format(frame))
                 self.futures.append(future)
 
-            self.offsets, self.sync_offset = eval_data
+            self.offsets, self.sync_offset, self.last_valid_sync = eval_data
             self.signals.new_data.emit(ui_data)
         self.eval_lock.lockForWrite()
         self.last_plotted_frame = frame

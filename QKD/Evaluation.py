@@ -47,7 +47,7 @@ def guess_key(bins):
     return np.array(key), np.array(qbers), np.array(num_sifted_det)
 
 
-def find_filter(phases, height=1):
+def find_filter(phases, height=0.8):
     bin_width = 1000
     filter_min = []
     filter_max = []
@@ -100,10 +100,12 @@ def evaluate_tags(data,
             print("Sync Chan detected")
             print("Key length: {}".format(key_length))
         t0 = sync_data[1]
+        print(t0 * 1E-12)
         data[1] -= t0 - 1000
         data = data[:,
                     np.logical_and(data[1] >= 0, data[1] <= (sync_data[-1] -
                                                              sync_data[1]))]
+        data[1] += t0
         sync_data = data[1][data[0] == channels["SYNC"]["ch"]]
         sync_phase = int(np.rint(stats.circmean(sync_data % dt, high=dt)))
         if verbose:
@@ -238,6 +240,7 @@ def process_data(data,
                  sent_key=None,
                  verbose=True,
                  time_filtering=True,
+                 last_valid_sync=0,
                  tm=0):
     print("Evaluating Frame {}".format(frame))
     start = time.time()
@@ -245,7 +248,8 @@ def process_data(data,
     if len(data[0]) <= 0:
         print("No Timestamps in frame")
         return frame, None
-    valid_data = get_valid_frames(data, channels, verbose=False)
+    valid_data, last_valid_sync = get_valid_frames(
+        data, channels, last_valid_sync=last_valid_sync, verbose=False)
     if len(valid_data) <= 0:
         print("No Sync detected in frame")
         if np.isnan(sync_offset):
@@ -288,22 +292,21 @@ def process_data(data,
     phase_data = [hists, bins, filters]
     cps_data = [frame, pol_clicks, meas_time, tm]
     ui_data = [
-        "{}".format(frame),
-        "{:.2f}% ± {:.2f}%".format(np.mean(qbers) * 100,
-                                   np.std(qbers) * 100),
-        "{:.2f}Kbit/s".format(np.sum(num_sifted_det) / meas_time / 1000),
-        "{:.0f}".format(sync_offset),
-        "{}".format(offsets),
+        frame,
+        qbers,
+        np.sum(num_sifted_det) / meas_time / 1000,
+        sync_offset,
+        offsets,
         key_match,
     ]
-    eval_data = [offsets, sync_offset]
+    eval_data = [offsets, sync_offset, last_valid_sync]
     duration = time.time() - start
 
     print("eval took {:.2f}s".format(duration))
     return frame, [eval_data, phase_data, cps_data, ui_data, sifted_events]
 
 
-def get_valid_frames(data, channels, verbose=True):
+def get_valid_frames(data, channels, last_valid_sync=0, verbose=True):
     valid_timing = 500  # in ps
     sync_indices = np.where(data[0] == channels["SYNC"]["ch"])[0]
     if len(sync_indices) <= 20:
@@ -311,7 +314,6 @@ def get_valid_frames(data, channels, verbose=True):
     sync_diffs = np.diff(data[1][sync_indices], append=0)
     sync_diffs_median = np.median(sync_diffs)
     #sync_diffs_median = 4096*10E-9
-    print(sync_diffs_median)
     sync_dropouts = np.where(
         np.logical_or(sync_diffs > (sync_diffs_median + valid_timing),
                       sync_diffs < (sync_diffs_median - valid_timing)))[0]
@@ -320,7 +322,6 @@ def get_valid_frames(data, channels, verbose=True):
             len(sync_dropouts), sync_indices[sync_dropouts]))
     sync_dropouts = np.concatenate(([-1], sync_dropouts))
     valid_frames = []
-    last_valid_sync = 0
     for i in range(len(sync_dropouts) - 1):
         beg = sync_indices[sync_dropouts[i] + 1]
         end = sync_indices[sync_dropouts[i + 1]]
@@ -331,7 +332,7 @@ def get_valid_frames(data, channels, verbose=True):
             #print(d)
             last_valid_sync = d[1, -1]
             valid_frames.append(d)
-    return np.concatenate(valid_frames, axis=1)
+    return np.concatenate(valid_frames, axis=1), last_valid_sync
 
 
 def compare_key(sent_key, detected_key):

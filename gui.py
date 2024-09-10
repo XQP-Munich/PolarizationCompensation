@@ -365,7 +365,11 @@ class Gui(QWidget):
         self.gridlayout.addWidget(self.set_widget, 0, 1)
 
         self.check_save_raw = QCheckBox("Save raw Data")
-        self.check_save_raw.stateChanged.connect(self.updateEvaluationSettings)
+        if self.mode == 0:
+            self.check_save_raw.setEnabled(False)
+        else:
+            self.check_save_raw.stateChanged.connect(
+                self.updateEvaluationSettings)
         self.check_save_sifted = QCheckBox("Save sifted Data")
         self.check_save_sifted.stateChanged.connect(
             self.updateEvaluationSettings)
@@ -475,10 +479,21 @@ class Gui(QWidget):
         pass
 
     def updateStats(self, data):
-        self.frame = int(data[0])
-        for text, data in zip(self.statTexts, data):
-            if data is not None:
-                text.setText(data)
+        self.frame = data[0]
+        ui_data = [
+            "{}".format(data[0]),
+            "{:.2f}% ± {:.2f}%".format(
+                np.mean(data[1]) * 100,
+                np.std(data[1]) * 100),
+            "{:.2f}Kbit/s".format(data[2]),
+            "{:.0f}".format(data[3]),
+            "{}".format(data[4]),
+            data[5],
+        ]
+
+        for text, d in zip(self.statTexts, ui_data):
+            if d is not None:
+                text.setText(d)
 
     def saveSettings(self, settings):
         with open(self.folder + "aliceSettings.csv", "a") as f:
