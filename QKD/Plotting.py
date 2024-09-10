@@ -66,7 +66,7 @@ def plot_mus(canvas,
              rep_rate=100E6,
              alice_loss=0,
              bob_loss=0):
-    frame, clicks, meas_time, tm = plot_data
+    frame, clicks, meas_time, tm, _ = plot_data
     key_length = sum(len(x) for x in clicks)
     mus = []
     for i in range(len(clicks)):
@@ -118,7 +118,7 @@ def plot_floss(canvas,
                rep_rate=100E6,
                alice_loss=0,
                bob_loss=0):
-    frame, clicks, meas_time, tm = plot_data
+    frame, clicks, meas_time, tm, bg_cps = plot_data
     expected_cps = rep_rate * mu * (10**(bob_loss / 10))
 
     key_length = sum(len(x) for x in clicks)
@@ -220,7 +220,7 @@ def plot_lloss(canvas,
                rep_rate=100E6,
                alice_loss=0,
                bob_loss=0):
-    frame, clicks, meas_time, tm = plot_data
+    frame, clicks, meas_time, tm, bg_cps = plot_data
     lmu = np.array(lmu).transpose()
     if len(lmu) <= 0:
         print("No Alice Data")
@@ -233,17 +233,17 @@ def plot_lloss(canvas,
     xs = np.arange(*interv, 1)
     lmut = np.interp(xs, lmu[0], lmu[1])
     mu = np.mean(lmut)
-    print(mu, 10**(bob_loss / 10))
-    expected_cps = rep_rate * mu * (10**(bob_loss / 10))
+
+    expected_cps = rep_rate * mu * (10**(bob_loss / 10))  #*bob_optics
 
     pols_sent = [len(x) for x in clicks]
-    print(pols_sent)
+
     chan_clicks = []
     for i in range(4):
         chan_clicks.append(
             np.sum(np.concatenate((clicks[i], clicks[i + 4]))) /
             (pols_sent[i] + pols_sent[i + 4]))
-    chan_cps = np.array(chan_clicks) / meas_time * np.sum(pols_sent)
+    chan_cps = np.array(chan_clicks) / meas_time * np.sum(pols_sent) - bg_cps
 
     print(chan_cps, expected_cps)
 
@@ -276,7 +276,7 @@ def plot_lloss(canvas,
 
 
 def plot_lmu(canvas, plot_data, lmu, rep_rate=100E6, alice_loss=0, bob_loss=0):
-    frame, cps, meas_time, tm = plot_data
+    frame, cps, meas_time, tm, _ = plot_data
     lmu = np.array(lmu).transpose()
     if len(lmu) <= 0:
         print("No Alice Data")

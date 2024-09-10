@@ -123,6 +123,8 @@ def evaluate_tags(data,
 
     if verbose:
         print("Got {:.2e} Events in {:.0f}s".format(len(data[0]), meas_time))
+        print("Got {:.2e} Photon Events in {:.0f}s".format(
+            len(data[0, data[0] != channels["SYNC"]["ch"]]), meas_time))
 
     if filters is None:
         temp_data = data.copy()
@@ -150,11 +152,21 @@ def evaluate_tags(data,
     phases = np.vstack(
         (data % dt, ((data[1] % (dt * key_length)) / dt).astype(int)))
 
+    bg_time_mask = np.logical_and(
+        np.logical_and(np.logical_and(phases[1] >= 0, phases[1] <= 2000),
+                       np.logical_and(phases[1] >= 8000, phases[1] <= 10000)),
+        data[0] != channels["SYNC"]["ch"])
+
+    data_bg = data[:, bg_time_mask]
+    bg_cps = len(data_bg[0]) / meas_time / 4 * 10
+    print("BG CPS: {}".format(bg_cps))
+
     time_mask = np.logical_or(
         np.logical_and(phases[1] >= filters[0], phases[1] <= filters[1]),
         data[0] == channels["SYNC"]["ch"])
-    #datan = data[:, ~time_mask]
+    datan = data[:, ~time_mask]
     data = data[:, time_mask]
+    print(len(data[1, data[0] != 5]), len(datan[1, datan[0] != 5]))
     #print("S/N: {}".format(
     #    len(data[1, data[0] != channels["SYNC"]["ch"]]) /
     #    len(datan[1, datan[0] != channels["SYNC"]["ch"]])))
@@ -228,7 +240,7 @@ def evaluate_tags(data,
         pol_clicks.append(pol_bin.sum(axis=1))
     return [
         phases, offsets, filters, sync_offset, qbers, num_sifted_det,
-        meas_time, t0 * 1E-12, sifted_events, pol_clicks, keymatch
+        meas_time, t0 * 1E-12, sifted_events, pol_clicks, keymatch, bg_cps
     ]
 
 
@@ -269,7 +281,7 @@ def process_data(data,
         return frame, None
     phases, offsets, filters, sync_offset = et[:4]
     qbers, num_sifted_det, meas_time, t0 = et[4:8]
-    sifted_events, pol_clicks, key_match = et[8:]
+    sifted_events, pol_clicks, key_match, bg_cps = et[8:]
 
     #self.verbose = False
     nmax = []
@@ -290,7 +302,7 @@ def process_data(data,
 
     hists[-1] = hists[-1] * (np.max(nmax[:-1]) / nmax[-1])
     phase_data = [hists, bins, filters]
-    cps_data = [frame, pol_clicks, meas_time, tm]
+    cps_data = [frame, pol_clicks, meas_time, tm, bg_cps]
     ui_data = [
         frame,
         qbers,
