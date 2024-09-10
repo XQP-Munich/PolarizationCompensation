@@ -153,8 +153,8 @@ def evaluate_tags(data,
         (data % dt, ((data[1] % (dt * key_length)) / dt).astype(int)))
 
     bg_time_mask = np.logical_and(
-        np.logical_and(np.logical_and(phases[1] >= 0, phases[1] <= 2000),
-                       np.logical_and(phases[1] >= 8000, phases[1] <= 10000)),
+        np.logical_or(np.logical_and(phases[1] >= 0, phases[1] <= 2000),
+                      np.logical_and(phases[1] >= 8000, phases[1] <= 10000)),
         data[0] != channels["SYNC"]["ch"])
 
     data_bg = data[:, bg_time_mask]

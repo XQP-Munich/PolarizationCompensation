@@ -68,6 +68,10 @@ def load_ts(path):
     return np.array([np.bitwise_and(data, 15), np.right_shift(data, 4)])
 
 
+def save_mu(mu, path):
+    np.save(path, mu)
+
+
 class WorkerSignals(QObject):
     new_data = pyqtSignal(object)
     conn_closed = pyqtSignal(object)
@@ -236,6 +240,7 @@ class Experimentor(Worker):
         print(self.data_files)
 
     def handle_alice_counts(self, counts):
+        print("New Alice mu data: {}".format(counts))
         self.alice_mu_data.append(counts)
 
     def loop(self, i):
@@ -283,6 +288,10 @@ class Experimentor(Worker):
             future.add_done_callback(self.eval_done)
             self.futures.append(future)
             if self.save_raw:
+                future = self.executor.submit(
+                    save_mu, self.alice_mu_data,
+                    self.folder + "mu_frame{}.npy".format(self.frame))
+                self.futures.append(future)
                 future = self.executor.submit(
                     save_ts, data,
                     self.folder + "raw_frame{}.bin".format(self.frame))
