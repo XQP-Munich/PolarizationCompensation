@@ -105,7 +105,6 @@ def evaluate_tags(data,
             print("Sync Chan detected")
             print("Key length: {}".format(key_length))
         t0 = sync_data[1]
-        print(t0 * 1E-12)
         data[1] -= t0 - 1000
         data = data[:,
                     np.logical_and(data[1] >= 0, data[1] <= (sync_data[-1] -
@@ -169,9 +168,10 @@ def evaluate_tags(data,
     time_mask = np.logical_or(
         np.logical_and(phases[1] >= filters[0], phases[1] <= filters[1]),
         data[0] == channels["SYNC"]["ch"])
-    datan = data[:, ~time_mask]
+    #datan = data[:, ~time_mask]
     data = data[:, time_mask]
-    print(len(data[1, data[0] != 5]), len(datan[1, datan[0] != 5]))
+    snr = len(data[1, data[0] != channels["SYNC"]["ch"]]) / (
+        len(data_bg[0]) / 4000 * (filters[1] - filters[0]))
     #print("S/N: {}".format(
     #    len(data[1, data[0] != channels["SYNC"]["ch"]]) /
     #    len(datan[1, datan[0] != channels["SYNC"]["ch"]])))
@@ -241,7 +241,7 @@ def evaluate_tags(data,
         pol_clicks.append(pol_bin.sum(axis=1))
     return [
         phases, offsets, filters, sync_offset, qbers, num_sifted_det,
-        meas_time, t0 * 1E-12, sifted_events, pol_clicks, keymatch, bg_cps
+        meas_time, t0 * 1E-12, sifted_events, pol_clicks, keymatch, bg_cps, snr
     ]
 
 
@@ -283,7 +283,8 @@ def process_data(
         return frame, None
     phases, offsets, filters, sync_offset = et[:4]
     qbers, num_sifted_det, meas_time, t0 = et[4:8]
-    sifted_events, pol_clicks, key_match, bg_cps = et[8:]
+    sifted_events, pol_clicks, key_match, bg_cps = et[8:12]
+    snr, = et[12:]
 
     #self.verbose = False
     nmax = []
@@ -312,6 +313,7 @@ def process_data(
         sync_offset,
         offsets,
         key_match,
+        snr,
     ]
     eval_data = [offsets, sync_offset, last_valid_sync]
     duration = time.time() - start

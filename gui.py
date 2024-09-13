@@ -449,6 +449,7 @@ class Gui(QWidget):
             "Sync Offset",
             "Offsets",
             "Key match",
+            "SNR",
         ]
         self.statTexts = []
         for j in range(len(settings)):
@@ -489,8 +490,10 @@ class Gui(QWidget):
             "{:.2f}%".format(data[1] * 100),
             "{:.2f}Kbit/s".format(data[2]),
             "{:.0f}".format(data[3]),
-            "{}".format(data[4]),
+            "{:.2f},{:.2f},{:.2f},{:.2f},{:.2f}".format(
+                *list(np.array(data[4]) / 10000)),
             data[5],
+            "{:.2f}".format(data[6]),
         ]
 
         for text, d in zip(self.statTexts, ui_data):

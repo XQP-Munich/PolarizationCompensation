@@ -280,7 +280,6 @@ class Experimentor(Worker):
                 if self.alice_mu_history is not None:
                     mus = self.alice_mu_history[self.alice_mu_history[:, 0] ==
                                                 frame]
-                    print(mus)
                     if len(mus) > 0:
                         self.alice_mu_data.append(mus[0])
                 self.time_last = time.time()
@@ -354,7 +353,6 @@ class Experimentor(Worker):
 
         if res is not None:
             eval_data, phase_data, click_data, ui_data, sifted_events = res
-
             for i in range(4):
                 future = self.executor.submit(plot_phases, self.canvases[i],
                                               phase_data)
