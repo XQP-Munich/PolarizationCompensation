@@ -15,7 +15,8 @@ chan_offset = [12000, 12071, 10000 - 4515, 13070, 12000]  # todo remove global
 def guess_key(bins):
     key = []
     qbers = []
-    num_sifted_det = []
+    num_sifted_det = 0
+    num_wrong_det = 0
     for count in bins:
         diff1 = count[0] - count[1]
         diff2 = count[2] - count[3]
@@ -28,23 +29,27 @@ def guess_key(bins):
                 if diff1 > 0:
                     val = 0
                     qber = count[1] / basis_counts
+                    num_wrong_det += count[1]
                 else:
                     val = 1
                     qber = count[0] / basis_counts
+                    num_wrong_det += count[0]
         else:
             basis_counts = count[2] + count[3]
             if basis_counts > 0:
                 if diff2 > 0:
                     val = 2
                     qber = count[3] / basis_counts
+                    num_wrong_det += count[3]
                 else:
                     val = 3
                     qber = count[2] / basis_counts
-        num_sifted_det.append(basis_counts)
+                    num_wrong_det += count[2]
+        num_sifted_det += basis_counts
         key.append(val)
         qbers.append(qber)
 
-    return np.array(key), np.array(qbers), np.array(num_sifted_det)
+    return np.array(key), num_wrong_det / num_sifted_det, num_sifted_det
 
 
 def find_filter(phases, height=0.8):
@@ -226,11 +231,7 @@ def evaluate_tags(data,
         phases[2] = phases[0]
 
     if verbose:
-        print("Mean Qber: {:.2f}% with std of {:.4f}".format(
-            np.nanmean(qbers) * 100,
-            np.nanstd(qbers) * 100))
-        print("Max Qber: {:.2f}% at {}".format(
-            np.max(qbers) * 100, bins[np.argmax(qbers)]))
+        print("Mean Qber: {:.2f}%".format(qbers * 100))
         print("Sifted key Rate: {:.2f}".format(
             np.sum(num_sifted_det) / meas_time))
 
@@ -244,16 +245,17 @@ def evaluate_tags(data,
     ]
 
 
-def process_data(data,
-                 frame,
-                 channels,
-                 offsets=chan_offset,
-                 sync_offset=np.nan,
-                 sent_key=None,
-                 verbose=True,
-                 time_filtering=True,
-                 last_valid_sync=0,
-                 tm=0):
+def process_data(
+    data,
+    frame,
+    channels,
+    offsets=chan_offset,
+    sync_offset=np.nan,
+    sent_key=None,
+    verbose=True,
+    time_filtering=True,
+    last_valid_sync=0,
+):
     print("Evaluating Frame {}".format(frame))
     start = time.time()
 
@@ -302,11 +304,11 @@ def process_data(data,
 
     hists[-1] = hists[-1] * (np.max(nmax[:-1]) / nmax[-1])
     phase_data = [hists, bins, filters]
-    cps_data = [frame, pol_clicks, meas_time, tm, bg_cps]
+    cps_data = [frame, pol_clicks, meas_time, bg_cps]
     ui_data = [
         frame,
         qbers,
-        np.sum(num_sifted_det) / meas_time / 1000,
+        num_sifted_det / meas_time / 1000,
         sync_offset,
         offsets,
         key_match,

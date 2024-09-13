@@ -66,7 +66,7 @@ def plot_mus(canvas,
              rep_rate=100E6,
              alice_loss=0,
              bob_loss=0):
-    frame, clicks, meas_time, tm, _ = plot_data
+    frame, clicks, meas_time, _ = plot_data
     key_length = sum(len(x) for x in clicks)
     mus = []
     for i in range(len(clicks)):
@@ -118,7 +118,7 @@ def plot_floss(canvas,
                rep_rate=100E6,
                alice_loss=0,
                bob_loss=0):
-    frame, clicks, meas_time, tm, bg_cps = plot_data
+    frame, clicks, meas_time, bg_cps = plot_data
     expected_cps = rep_rate * mu * (10**(bob_loss / 10))
 
     key_length = sum(len(x) for x in clicks)
@@ -155,7 +155,7 @@ def plot_floss(canvas,
 
 def plot_qber(canvas, ui_data):
     frame, qber, _, _, _, _ = ui_data
-    qber = np.mean(qber) * 100
+    qber *= 100
 
     ax = canvas.axes
     ax.cla()
@@ -220,19 +220,11 @@ def plot_lloss(canvas,
                rep_rate=100E6,
                alice_loss=0,
                bob_loss=0):
-    frame, clicks, meas_time, tm, bg_cps = plot_data
-    lmu = np.array(lmu).transpose()
+    frame, clicks, meas_time, bg_cps = plot_data
     if len(lmu) <= 0:
         print("No Alice Data")
         return
-    interv = (tm - meas_time, tm)
-    for t in interv:
-        if t < lmu[0][0] - 10 or t > lmu[0][-1] + 10:
-            print("{} is not in [{},{}]".format(t, lmu[0][0], lmu[0][-1]))
-            return
-    xs = np.arange(*interv, 1)
-    lmut = np.interp(xs, lmu[0], lmu[1])
-    mu = np.mean(lmut)
+    mu = lmu[-1][1]
 
     expected_cps = rep_rate * mu * (10**(bob_loss / 10))  #*bob_optics
 
@@ -276,19 +268,11 @@ def plot_lloss(canvas,
 
 
 def plot_lmu(canvas, plot_data, lmu, rep_rate=100E6, alice_loss=0, bob_loss=0):
-    frame, cps, meas_time, tm, _ = plot_data
-    lmu = np.array(lmu).transpose()
+    frame, cps, meas_time, _ = plot_data
     if len(lmu) <= 0:
         print("No Alice Data")
         return
-    interv = (tm - meas_time, tm)
-    for t in interv:
-        if t < lmu[0][0] - 10 or t > lmu[0][-1] + 10:
-            print("{} is not in [{},{}]".format(t, lmu[0][0], lmu[0][-1]))
-            return
-    xs = np.arange(*interv, 1)
-    lmut = np.interp(xs, lmu[0], lmu[1])
-    mu = np.mean(lmut)
+    mu = lmu[-1][1]
 
     ax = canvas.axes
     ax.cla()

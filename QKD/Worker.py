@@ -68,8 +68,19 @@ def load_ts(path):
     return np.array([np.bitwise_and(data, 15), np.right_shift(data, 4)])
 
 
-def save_mu(mu, path):
-    np.save(path, mu)
+def save_mu(frame, mu, path):
+    with open(path, "a") as f:
+        f.writelines("{}\t{}\n".format(frame, mu))
+
+
+def load_mu(path):
+    if os.path.isfile(path):
+        mus = []
+        with open(path, "r") as f:
+            for line in f.readlines():
+                frame, mu = line[:-1].split("\t")
+                mus.append([int(frame), float(mu)])
+        return np.array(mus)
 
 
 class WorkerSignals(QObject):
@@ -160,13 +171,33 @@ class Experimentor(Worker):
         self.floss = -25.1
         self.fmu = 0.33
         self.last_valid_sync = 0
+        self.alice_raw_mu_data = []
         self.alice_mu_data = []
-
+        self.alice_mu_history = None
         self.plot_mode = 0
         if self.mode == 0:
             self.initPlayback()
         else:
             self.initMeasurement()
+
+    def initPlayback(self):
+        self.data_files = []
+        self.get_data_files()
+        self.get_aux_data()
+        self.time_last = time.time()
+        self.loop_playback = True
+
+    def initMeasurement(self):
+        self.stream = self.timestamp.get_stream()
+        self.stream.start()
+
+    def get_data_files(self):
+        print("Reading in data files from: {}".format(self.folder))
+        for f in os.listdir(self.folder):
+            if f.endswith(".bin"):
+                self.data_files.append(f)
+        self.data_files.sort(key=natural_keys)
+        print(self.data_files)
 
     def get_key(self):
         self.sent_key = []
@@ -175,19 +206,13 @@ class Experimentor(Worker):
             for char in file.readline()[:-1]:
                 self.sent_key.append(state_map[char])
 
+    def get_aux_data(self):
+        print("Reading in auxilary files from: {}".format(self.folder))
+        self.alice_mu_history = load_mu(self.folder + "alice_Brightness.csv")
+
     def set_meas_time(self, time):
         print("Setting measurement time to {}s".format(time))
         self.meas_time = time
-
-    def initPlayback(self):
-        self.data_files = []
-        self.get_data_files()
-        self.time_last = time.time()
-        self.loop_playback = True
-
-    def initMeasurement(self):
-        self.stream = self.timestamp.get_stream()
-        self.stream.start()
 
     def set_aliceSettings(self, settings):
         aliceSettings = {0: {}}
@@ -196,7 +221,7 @@ class Experimentor(Worker):
             pol = pol[:-1] + [pol[-2] + pol[-1]]
             aliceSettings[0][pols[i]] = pol
         print(aliceSettings)
-        self.alice.set_aliceSettings(aliceSettings=aliceSettings)
+        self.alice.set_aliceSettings(aliceSettings)
         #self.alice.turn_off()
         self.alice.turn_on(set=0)
         self.reset = True
@@ -232,16 +257,9 @@ class Experimentor(Worker):
         if settings is not None:
             self.time_filtering, self.save_raw, self.save_sifted = settings
 
-    def get_data_files(self):
-        for f in os.listdir(self.folder):
-            if f.endswith(".bin"):
-                self.data_files.append(f)
-        self.data_files.sort(key=natural_keys)
-        print(self.data_files)
-
     def handle_alice_counts(self, counts):
         print("New Alice mu data: {}".format(counts))
-        self.alice_mu_data.append(counts)
+        self.alice_raw_mu_data.append(counts)
 
     def loop(self, i):
         data = None
@@ -259,7 +277,14 @@ class Experimentor(Worker):
                     frame, self.data_files[frame]))
                 data = load_ts(self.folder + self.data_files[frame]).view(
                     np.int64)
+                if self.alice_mu_history is not None:
+                    mus = self.alice_mu_history[self.alice_mu_history[:, 0] ==
+                                                frame]
+                    print(mus)
+                    if len(mus) > 0:
+                        self.alice_mu_data.append(mus[0])
                 self.time_last = time.time()
+
         else:
             if self.reset or (self.stream.getCaptureDuration() * 1E-12 -
                               self.lastmeas) >= self.meas_time:
@@ -271,7 +296,21 @@ class Experimentor(Worker):
                 if clock_errors != 0:
                     print("{} Clock errors detected".format(clock_errors))
 
-        if data is not None and not self.reset:
+                if len(self.alice_raw_mu_data) > 0:
+                    lmu = np.array(self.alice_raw_mu_data).transpose()
+                    interv = (time.time() - self.meas_time, time.time())
+                    if interv[0] >= lmu[0][0] - 10 and interv[
+                            -1] <= lmu[0][-1] + 10:
+                        xs = np.arange(*interv, 1)
+                        lmut = np.mean(np.interp(xs, lmu[0], lmu[1]))
+                        self.alice_mu_data.append([self.frame, lmut])
+                        save_mu(self.frame, lmut,
+                                self.folder + "alice_Brightness.csv")
+                    else:
+                        print("{} is not in [{},{}]".format(
+                            interv, lmu[0][0], lmu[0][-1]))
+
+        if (data is not None) and (not self.reset):
             future = self.executor.submit(
                 process_data,
                 data,
@@ -282,20 +321,16 @@ class Experimentor(Worker):
                 sent_key=self.sent_key,
                 time_filtering=self.time_filtering,
                 verbose=True,
-                tm=time.time(),
                 last_valid_sync=self.last_valid_sync,
             )
             future.add_done_callback(self.eval_done)
             self.futures.append(future)
             if self.save_raw:
                 future = self.executor.submit(
-                    save_mu, self.alice_mu_data,
-                    self.folder + "mu_frame{}.npy".format(self.frame))
-                self.futures.append(future)
-                future = self.executor.submit(
                     save_ts, data,
                     self.folder + "raw_frame{}.bin".format(self.frame))
                 self.futures.append(future)
+
             self.frame += 1
 
         for future in list(self.futures):
@@ -609,10 +644,6 @@ class Alice_Client(QObject):
         if self.conn is not None:
             self.conn.kill()
         self.client.kill()
-
-    def send(self, message):
-        if self.conn is not None:
-            self.conn.send(message)
 
     def handle_message(self, message):
         conn_nr, msg = message

@@ -9,6 +9,7 @@ import matplotlib
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 import toml
+import json
 from PyQt5.QtWidgets import (
     QRadioButton,
     QWidget,
@@ -321,6 +322,8 @@ class Gui(QWidget):
         self.mode = mode
         self.initUI()
         self.initWorkers()
+        if self.mode == 0:
+            self.loadSettings()
 
     def initUI(self):
         self.canvases = []
@@ -422,7 +425,7 @@ class Gui(QWidget):
                 else:
                     settingsSpinBox.setRange(0, 1023 - aliceSettings[i][j - 1])
                 settingsSpinBox.setValue(aliceSettings[i][j])
-                if False:  #self.mode == 0:
+                if self.mode == 0:
                     settingsSpinBox.setEnabled(False)
                 else:
                     settingsSpinBox.valueChanged.connect(self.settingsChanged)
@@ -439,18 +442,22 @@ class Gui(QWidget):
 
         statisticsGroup = QGroupBox("Stats")
         statisticsLayout = QHBoxLayout()
-        settings = [["Frame", (0, 255), 0], ["QBER", (0, 255), 0],
-                    ["Sifted Key Rate", (0, 1023), 0],
-                    ["Sync Offset", (0, 1023), 0], ["Offsets", (0, 1023), 0],
-                    ["Key match", (0, 1023), 0]]
+        settings = [
+            "Frame",
+            "QBER",
+            "Sifted Key Rate",
+            "Sync Offset",
+            "Offsets",
+            "Key match",
+        ]
         self.statTexts = []
         for j in range(len(settings)):
-            statisticsLabel = QLabel(settings[j][0])
+            statisticsLabel = QLabel(settings[j])
             statisticsLabel.setAlignment(Qt.AlignRight)
             cfont = QFont()
             #cfont.setPointSize(18)
             statisticsLabel.setFont(cfont)
-            statisticsText = QLabel("0.53")
+            statisticsText = QLabel("---")
             self.statTexts.append(statisticsText)
             statisticsText.setAlignment(Qt.AlignLeft)
             statisticsLayout.addWidget(statisticsLabel)
@@ -475,16 +482,11 @@ class Gui(QWidget):
 
         self.show()
 
-    def updateLaser(self, data):
-        pass
-
     def updateStats(self, data):
         self.frame = data[0]
         ui_data = [
             "{}".format(data[0]),
-            "{:.2f}% ± {:.2f}%".format(
-                np.mean(data[1]) * 100,
-                np.std(data[1]) * 100),
+            "{:.2f}%".format(data[1] * 100),
             "{:.2f}Kbit/s".format(data[2]),
             "{:.0f}".format(data[3]),
             "{}".format(data[4]),
@@ -495,16 +497,27 @@ class Gui(QWidget):
             if d is not None:
                 text.setText(d)
 
+        if self.mode == 0:
+            for frame, settings in self.aliceSettingsHistory:
+                if frame > self.frame:
+                    break
+                if frame < self.frame:
+                    continue
+                self.updateAliceSpinBoxes(settings)
+
     def saveSettings(self, settings):
-        with open(self.folder + "aliceSettings.csv", "a") as f:
+        with open(self.folder + "alice_Settings.csv", "a") as f:
             f.writelines("{}\t{}\n".format(self.frame, settings))
 
-    def loadSettings(self, settings):
-        path = self.folder + "aliceSettings.csv"
+    def loadSettings(self):
+        path = self.folder + "alice_Settings.csv"
         if os.path.isfile(path):
+            self.aliceSettingsHistory = []
             with open(path, "r") as f:
-                for line in f.readlines:
-                    frame, settings = line[:-1].split("\t")
+                for line in f.readlines():
+                    frame, setting = line[:-1].split("\t")
+                    setting = json.loads(setting)
+                    self.aliceSettingsHistory.append((int(frame), setting))
 
     def aliceConnectionChanged(self, connected):
         self.btn_set_Alice.setEnabled(connected)
@@ -524,6 +537,13 @@ class Gui(QWidget):
                 if i == 4:
                     sbox.setRange(0, 1023 - p[i - 1].value())
                 self.aliceSettings[-1].append(sbox.value())
+
+    def updateAliceSpinBoxes(self, settings):
+        for i, p in enumerate(self.aliceSettingsSpinBoxes):
+            for j, sbox in enumerate(p):
+                if j == 4:
+                    sbox.setRange(0, 1023 - settings[i][j - 1])
+                sbox.setValue(settings[i][j])
 
     def setAliceSettings(self):
         self.alice_settings_set_signal.emit(self.aliceSettings)

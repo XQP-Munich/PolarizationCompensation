@@ -15,7 +15,7 @@ class TimeTaggerLmu():
 
     def get_counts_per_second(self, t):
         if self.simulate:
-            return 10000 + 0 * np.random.random()
+            return 19000 + 2000 * np.random.random()
         cnts = []
         data = self._send_command(self.commandLine.format(t))
         for line in data.split("\n"):
