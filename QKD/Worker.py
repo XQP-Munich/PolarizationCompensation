@@ -150,6 +150,8 @@ class Experimentor(Worker):
         self.save_raw = False
         self.save_sifted = False
         self.time_filtering = True
+        self.auto_filtering = True
+        self.filter_width = 1000
 
         self.host = "t14s"
 
@@ -255,7 +257,7 @@ class Experimentor(Worker):
 
     def update_eval_settings(self, settings):
         if settings is not None:
-            self.time_filtering, self.save_raw, self.save_sifted = settings
+            self.time_filtering, self.auto_filtering, self.filter_width, self.save_raw, self.save_sifted = settings
 
     def handle_alice_counts(self, counts):
         print("New Alice mu data: {}".format(counts))
@@ -319,6 +321,8 @@ class Experimentor(Worker):
                 sync_offset=self.sync_offset,
                 sent_key=self.sent_key,
                 time_filtering=self.time_filtering,
+                auto_filtering=self.auto_filtering,
+                filter_width=self.filter_width,
                 verbose=True,
                 last_valid_sync=self.last_valid_sync,
             )

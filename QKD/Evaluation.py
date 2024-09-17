@@ -59,6 +59,7 @@ def find_filter(phases, height=0.8):
     shifts = []
     target_shifts = [0.4, 0.4, 0.4, 0.4, 0.1]
     heights = [height] * 4 + [0.5]
+    chanpeaks = []
     for i in range(5):
         bins = np.histogram(phases[1, phases[0] == i + 1],
                             bins=bin_width,
@@ -68,6 +69,7 @@ def find_filter(phases, height=0.8):
         shifts.append(int(shift * dt / bin_width))
         bins = np.roll(bins, shift)
         peaks += shift
+        chanpeaks.append(peaks[0])
         _, _, f_min, f_max = sgnl.peak_widths(bins,
                                               peaks,
                                               rel_height=heights[i],
@@ -77,7 +79,7 @@ def find_filter(phases, height=0.8):
     return np.array(shifts), np.array([
         np.mean(filter_min[:4]),
         np.mean(filter_max[:4]), filter_min[4], filter_max[4]
-    ])
+    ]), np.array(chanpeaks) * dt / bin_width
 
 
 def evaluate_tags(data,
@@ -88,7 +90,9 @@ def evaluate_tags(data,
                   sync_offset=np.nan,
                   filters=None,
                   verbose=True,
-                  time_filtering=True):
+                  time_filtering=True,
+                  auto_filtering=True,
+                  filter_width=1000):
     sync_data = data[1][data[0] == channels["SYNC"]["ch"]]
     sync_phase = 0
     #sync_offset = 6
@@ -135,15 +139,21 @@ def evaluate_tags(data,
         for i in range(0, 5):
             temp_data[1, temp_data[0] == i + 1] += offsets[i]
         try:
-            shifts, filters, = find_filter(temp_data % dt)
+            shifts, filters, peaks = find_filter(temp_data % dt)
             offsets += shifts + sync_phase
-        except:
-            print("Unable to find peaks")
+            print(time_filtering, auto_filtering, filter_width, peaks)
+            if not time_filtering:
+                filters = np.array([0, dt, 0, dt])
+            elif not auto_filtering:
+                mpeaks = np.mean(peaks[:-1])
+                filters = np.array([
+                    mpeaks - filter_width * 0.5, mpeaks + filter_width * 0.5,
+                    filters[2], filters[3]
+                ])
+        except Exception as e:
+            print("Unable to find peaks: {}".format(e))
             offsets = np.array(offsets) + sync_phase
             filters = np.array([0, dt, 0, dt])
-
-    if not time_filtering:
-        filters = np.array([0, dt, 0, dt])
 
     if verbose:
         print("Offsets: {}".format(offsets))
@@ -254,6 +264,8 @@ def process_data(
     sent_key=None,
     verbose=True,
     time_filtering=True,
+    auto_filtering=True,
+    filter_width=1000,
     last_valid_sync=0,
 ):
     print("Evaluating Frame {}".format(frame))
@@ -277,7 +289,9 @@ def process_data(
                        sync_offset=sync_offset,
                        sent_key=sent_key,
                        verbose=verbose,
-                       time_filtering=time_filtering)
+                       time_filtering=time_filtering,
+                       auto_filtering=auto_filtering,
+                       filter_width=filter_width)
     if len(et) == 0:
         print("Evaluation error, continue")
         return frame, None

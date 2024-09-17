@@ -190,7 +190,8 @@ def evaluate_Polcomp_Counts(counts,
           (matrix[1][4] - matrix[1][5]) / (matrix[1][4] + matrix[1][5])]
 
     a = angle_between_stokes_vectors(v1, v2)
-    print("Angle between the stokes vectors: {}".format(a))
+    print("Angle between the stokes vectors: {} for:\n{}:{}\n{}:{}".format(
+        a, sent_pol[0], v1, sent_pol[1], v2))
 
     # Create a zero row with the same number of columns as your matrix
     zero_row = np.zeros(matrix.shape[1])

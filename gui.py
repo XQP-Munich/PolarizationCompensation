@@ -355,6 +355,27 @@ class Gui(QWidget):
         self.set_layout = QHBoxLayout()
         self.set_widget.setLayout(self.set_layout)
 
+        self.check_time_filter = QCheckBox("Time Filtering")
+        self.check_time_filter.setChecked(True)
+        self.check_time_filter.stateChanged.connect(
+            self.updateEvaluationSettings)
+        self.auto_time_filter = QCheckBox("Auto Filter")
+        self.auto_time_filter.setChecked(True)
+        self.auto_time_filter.stateChanged.connect(
+            self.updateEvaluationSettings)
+        self.timeFilterSpinBox = QSpinBox()
+        self.timeFilterSpinBox.setAlignment(Qt.AlignCenter)
+        self.timeFilterSpinBox.setRange(1, 10000)
+        self.timeFilterSpinBox.setValue(1000)
+        self.timeFilterSpinBox.setSuffix("ps")
+        self.timeFilterSpinBox.valueChanged.connect(
+            self.updateEvaluationSettings)
+        self.set_layout.addWidget(self.check_time_filter)
+        self.set_layout.addWidget(self.auto_time_filter)
+        self.set_layout.addWidget(self.timeFilterSpinBox)
+
+        self.gridlayout.addWidget(self.set_widget, 0, 1)
+
         measLabel = QLabel("Measurement Time")
         measLabel.setAlignment(Qt.AlignCenter)
         self.measSpinBox = QSpinBox()
@@ -362,11 +383,6 @@ class Gui(QWidget):
         self.measSpinBox.setRange(1, 60 * 60)
         self.measSpinBox.setValue(5)
         self.measSpinBox.valueChanged.connect(self.settingsChanged)
-        self.set_layout.addWidget(measLabel)
-        self.set_layout.addWidget(self.measSpinBox)
-
-        self.gridlayout.addWidget(self.set_widget, 0, 1)
-
         self.check_save_raw = QCheckBox("Save raw Data")
         if self.mode == 0:
             self.check_save_raw.setEnabled(False)
@@ -376,14 +392,12 @@ class Gui(QWidget):
         self.check_save_sifted = QCheckBox("Save sifted Data")
         self.check_save_sifted.stateChanged.connect(
             self.updateEvaluationSettings)
-        self.check_time_filter = QCheckBox("Time Filtering")
-        self.check_time_filter.setChecked(True)
-        self.check_time_filter.stateChanged.connect(
-            self.updateEvaluationSettings)
+        self.updateEvaluationSettings()
 
         self.cb_widget = QWidget()
         self.cb_layout = QHBoxLayout()
-        self.cb_layout.addWidget(self.check_time_filter)
+        self.cb_layout.addWidget(measLabel)
+        self.cb_layout.addWidget(self.measSpinBox)
         self.cb_layout.addWidget(self.check_save_raw)
         self.cb_layout.addWidget(self.check_save_sifted)
         self.cb_widget.setLayout(self.cb_layout)
@@ -555,9 +569,15 @@ class Gui(QWidget):
     def updateEvaluationSettings(self):
         self.eval_settings_changed_signal.emit([
             self.check_time_filter.isChecked(),
+            self.auto_time_filter.isChecked(),
+            self.timeFilterSpinBox.value(),
             self.check_save_raw.isChecked(),
             self.check_save_sifted.isChecked()
         ])
+        if self.auto_time_filter.isChecked():
+            self.timeFilterSpinBox.setEnabled(False)
+        else:
+            self.timeFilterSpinBox.setEnabled(True)
 
     def initWorkers(self):
         self.threadpool = QThreadPool.globalInstance()
