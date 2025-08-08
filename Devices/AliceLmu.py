@@ -7,7 +7,7 @@ from Devices.Templates import SOURCE
 aliceConfig = """#AliceControl configuration file
 #General Configuration
 [general]
-version = "1.0.0"
+version = "1.1"
 
 [io]
 inputFile = ""
@@ -21,7 +21,7 @@ bitsPerChoice = 1
 blockLength = 8386752
 decoyRatio = 0.5
 #in Symbols max todo: 134216912 +4 nw +32 w why? / 118292480 <-working  / 8871936 <- to small?
-keyChunkSize = 8386752
+keyChunkSize = 10483440
 #in Byte
 randomChunkSize = 1000000
 randomFile = "/dev/urandom"
@@ -33,31 +33,31 @@ randomFile = "/dev/urandom"
 bias = {}
 modSig = {}
 modDec = {}
-delayA = {}
-delayB = {}
+timing = {}
+width = {}
 
 [laserConfig.channel2]
 bias = {}
 modSig = {}
 modDec = {}
-delayA = {}
-delayB = {}
+timing = {}
+width = {}
 
 
 [laserConfig.channel3]
 bias = {}
 modSig = {}
 modDec = {}
-delayA = {}
-delayB = {}
+timing = {}
+width = {}
 
 
 [laserConfig.channel4]
 bias = {}
 modSig = {}
 modDec = {}
-delayA = {}
-delayB = {}
+timing = {}
+width = {}
 
 
 
@@ -69,9 +69,8 @@ tcpChunkSize = 2888"""
 
 
 class AliceLmu(SOURCE):
-
     def __init__(self, host="local", aliceSettings=None):
-        self.commandLine = "alice-control -c {} -b {} -ms {} -md {} -da {} -db {}"
+        self.commandLine = "alice-control -c {} -b {} -ms {} -md {} -t {} -w {}"
         self.host = host
         self.channel_map = {"H": 1, "V": 2, "P": 3, "M": 4}
         if aliceSettings:
@@ -79,10 +78,10 @@ class AliceLmu(SOURCE):
         else:
             self.aliceSettings = {
                 1: {
-                    "H": [3, 255, 186, 100, 100 + 76],
-                    "V": [3, 204, 197, 96, 96 + 70],
-                    "P": [4, 237, 172, 117, 117 + 66],
-                    "M": [3, 180, 176, 82, 82 + 63]
+                    "H": [3, 255, 186, 100, 76],
+                    "V": [3, 204, 197, 96, 70],
+                    "P": [4, 237, 172, 117, 66],
+                    "M": [3, 180, 176, 82, 63],
                 }
             }
 
@@ -93,19 +92,27 @@ class AliceLmu(SOURCE):
         if pol:
             print("Turn on pol: {}".format(pol))
             self._send_command(
-                self.commandLine.format(self.channel_map[pol],
-                                        *self.aliceSettings[set][pol]))
+                self.commandLine.format(
+                    self.channel_map[pol], *self.aliceSettings[set][pol]
+                )
+            )
         else:
             with open("aliceConfig.toml", "w") as f:
                 f.writelines(
-                    aliceConfig.format(*self.aliceSettings[set]["H"],
-                                       *self.aliceSettings[set]["V"],
-                                       *self.aliceSettings[set]["P"],
-                                       *self.aliceSettings[set]["M"]))
+                    aliceConfig.format(
+                        *self.aliceSettings[set]["H"],
+                        *self.aliceSettings[set]["V"],
+                        *self.aliceSettings[set]["P"],
+                        *self.aliceSettings[set]["M"],
+                    )
+                )
             if not self.host == "local":
-                self._send_command("scp {} {}:~/{}".format(
-                    "aliceConfig.toml", self.host, "aliceConfig.toml"),
-                                   forcelocal=True)
+                self._send_command(
+                    "scp {} {}:~/{}".format(
+                        "aliceConfig.toml", self.host, "aliceConfig.toml"
+                    ),
+                    forcelocal=True,
+                )
             self._send_command("alice-control")
 
     def turn_off(self):
@@ -117,29 +124,32 @@ class AliceLmu(SOURCE):
         if not (self.host == "local" or forcelocal):
             return self._send_command_ssh(command)
 
-        proc = subprocess.Popen(command.split(" "),
-                                shell=False,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+        proc = subprocess.Popen(
+            command.split(" "),
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         output, error = proc.communicate()
 
         if error:
             raise Exception(f"Error {error.decode('utf-8')}")
 
-        return output.decode('utf-8')
+        return output.decode("utf-8")
 
     def _send_command_ssh(self, command):
-
-        ssh = subprocess.Popen(["ssh", self.host, command],
-                               shell=False,
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
+        ssh = subprocess.Popen(
+            ["ssh", self.host, command],
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         output, error = ssh.communicate()
 
         if error:
             raise Exception(f"Error {error.decode('utf-8')}")
 
-        return output.decode('utf-8')
+        return output.decode("utf-8")
 
     def txt_to_key(self, filename):
         data = []
@@ -165,9 +175,12 @@ class AliceLmu(SOURCE):
         keyfilename = dir + "/" + filename + ".key"
         data.tofile(keyfilename)
         if not self.host == "local":
-            self._send_command("scp {} {}:~/{}".format(
-                os.path.abspath(keyfilename), self.host, filename + ".key"),
-                               forcelocal=True)
+            self._send_command(
+                "scp {} {}:~/{}".format(
+                    os.path.abspath(keyfilename), self.host, filename + ".key"
+                ),
+                forcelocal=True,
+            )
             return "~/" + filename + ".key"
         return filename
 
@@ -176,8 +189,7 @@ class AliceLmu(SOURCE):
         if file_extension == ".key":
             self._send_command("ram-playback -if {}".format(key))
         else:
-            self._send_command("ram-playback -if {}".format(
-                self.txt_to_key(key)))
+            self._send_command("ram-playback -if {}".format(self.txt_to_key(key)))
 
     def stop_key(self):
         self._send_command("ram-playback -s")

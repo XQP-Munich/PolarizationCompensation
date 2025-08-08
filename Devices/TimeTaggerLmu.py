@@ -2,55 +2,46 @@ import subprocess
 import os
 import numpy as np
 import time
-
+import re
 from Devices.Templates import TIMESTAMP
 
 
-class TimeTaggerLmu():
+class TimeTaggerLmu(TIMESTAMP):
+    def __init__(self, channels):
+        self.channels = channels
+        result = subprocess.run(
+            ["counter", "-t", "0.1", "-s", "1"], capture_output=True, text=True
+        )
 
-    def __init__(self, host="local", simulate=False):
-        self.commandLine = "counter -t 1 -s {}"
-        self.host = host
-        self.simulate = simulate
+        if result.returncode != 0:
+            raise Exception("Error:\n", result.stderr)
+
+    def read(self, t):
+        return super().read(t)
+
+    def stop(self):
+        return super().stop()
 
     def get_counts_per_second(self, t):
-        if self.simulate:
-            return 19000 + 2000 * np.random.random()
-        cnts = []
-        data = self._send_command(self.commandLine.format(t))
-        for line in data.split("\n"):
-            if line != "":
-                sp = [x for x in line.split(" ") if x != ""]
-                if len(sp) != 10:
-                    print(line)
-                cnts.append(int(sp[2]))
+        result = subprocess.run(
+            ["counter", "-t", "1", "-s", str(t)], capture_output=True, text=True
+        )
 
-        return np.mean(cnts)
-
-    def _send_command(self, command):
-        print("sending command:\n{}".format(command))
-        if not (self.host == "local"):
-            return self._send_command_ssh(command)
-
-        proc = subprocess.Popen(command.split(" "),
-                                shell=False,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
-        output, error = proc.communicate()
-        if error:
-            raise Exception(f"Error {error.decode('utf-8')}")
-
-        return output.decode('utf-8')
-
-    def _send_command_ssh(self, command):
-
-        ssh = subprocess.Popen(["ssh", self.host, command],
-                               shell=False,
-                               stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
-        output, error = ssh.communicate()
-
-        if error:
-            raise Exception(f"Error {error.decode('utf-8')}")
-
-        return output.decode('utf-8')
+        if result.returncode != 0:
+            raise Exception("Error:\n", result.stderr)
+        data = np.array(
+            [
+                list(map(int, re.split(r"\s+", line.strip())))
+                for line in result.stdout.strip().splitlines()
+            ]
+        )
+        data_filtered = data[
+            :,
+            [
+                self.channels["H"]["ch"] + 2,
+                self.channels["V"]["ch"] + 2,
+                self.channels["P"]["ch"] + 2,
+                self.channels["M"]["ch"] + 2,
+            ],
+        ]
+        return data[:, 0] * 1e-12, data_filtered

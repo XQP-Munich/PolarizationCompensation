@@ -11,7 +11,6 @@ def model(alpha, beta, gamma):
 
 
 def get_angles(matrix, x0=[0, 0, 0], output=False, r=[8, 8, 8], Ns=10):
-
     def f(val):
         alpha, beta, gamma = val
         A = model(alpha, beta, gamma) - matrix
@@ -21,13 +20,19 @@ def get_angles(matrix, x0=[0, 0, 0], output=False, r=[8, 8, 8], Ns=10):
     x0 = np.array(x0)
 
     a, b, g = x0
-    ar, br, gr, = x0 + r
+    (
+        ar,
+        br,
+        gr,
+    ) = x0 + r
     res = brute(f, ((a, ar), (b, br), (g, gr)), Ns=Ns, full_output=True)
     alpha, beta, gamma = [x % 360 for x in res[0]]
     if output:
         print(
-            "alpha = {:.1f}, beta = {:.1f}, gamma = {:.1f} with error = {:.1f}"
-            .format(alpha, beta, gamma, res[1]))
+            "alpha = {:.1f}, beta = {:.1f}, gamma = {:.1f} with error = {:.1f}".format(
+                alpha, beta, gamma, res[1]
+            )
+        )
         print()
         print("target matrix:")
         printMatrix(matrix)
@@ -61,8 +66,11 @@ positions = np.array(positions[1:])
 pt = np.transpose(positions)
 
 a, b, g, e = get_angles(qwp(0), output=False, x0=[0, 0, 0], r=[180, 180, 180])
-print("Values for fixed QWP at 0deg: alpha={:.2f}, beta={:.2f}, gamma={:.2f}".
-      format(a, b, g))
+print(
+    "Values for fixed QWP at 0deg: alpha={:.2f}, beta={:.2f}, gamma={:.2f}".format(
+        a, b, g
+    )
+)
 
 for i, ys in enumerate(pt):
     plt.plot(xs, ys, label=i)
@@ -70,4 +78,11 @@ plt.plot(xs, np.array(es) * 10**7, label="error *10^7")
 plt.xlabel("Rotation angle of simulated HWP in deg")
 plt.ylabel("Rotation angle of actual WPs in deg")
 plt.legend()
+print(
+    "Values for fixed HWP at 0deg: alpha={:.2f}, beta={:.2f}, gamma={:.2f}".format(
+        pt[0][0], pt[1][0], pt[2][0]
+    )
+)
+
+
 plt.show()
